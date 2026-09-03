@@ -1,0 +1,41 @@
+--
+--  AdaChess-BB : a bitboard chess engine, written from scratch in Ada as a
+--  learning/validation counterpart of the mailbox-based AdaChess.
+--
+--  The two engines live in the same repository but are built by two
+--  independent projects (see adachess.gpr for the mailbox one). This keeps
+--  them fully decoupled while allowing easy side-by-side validation
+--  (perft oracle, matches via XBoard).
+--
+
+project AdaChess_BB is
+
+   for Main use ("adachess_bb.adb");
+   for Object_Dir use "obj_bb";
+   for Exec_Dir use "bin_bb";
+   for Source_Dirs use ("src_bb/**");
+   for Languages use ("Ada");
+
+   type Mode_Type is
+      ("release", "debug");
+   Mode : Mode_Type := external ("Mode", "release");
+
+   package Builder is
+      for Default_Switches ("ada") use ("-g");
+      for Executable ("adachess_bb.adb") use "adachess_bb";
+   end Builder;
+
+   package Compiler is
+      case Mode is
+         when "release" =>
+            for Switches ("ada") use ("-gnat2012", "-gnatp", "-gnatn", "-O3", "-gnatf");
+         when "debug" =>
+            for Switches ("ada") use ("-gnat2012", "-gnata", "-g");
+      end case;
+   end Compiler;
+
+   package Linker is
+      for Switches ("ada") use ("-g");
+   end Linker;
+
+end AdaChess_BB;
