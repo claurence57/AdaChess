@@ -612,9 +612,9 @@ begin
                 end if;
              end if;
 
-             Chessboard.Play (Move);
+              Chessboard.Play (Move);
 
-             case Communication_Protocol is
+              case Communication_Protocol is
                 when Winboard =>
                    Ada.Text_IO.Put ("move ");
                    Print_Move (Move, Pure_Algebraic);
@@ -797,14 +797,53 @@ begin
 
          when Level =>
             Level_Block : declare
-               Moves     : Natural;
-               Minutes   : Natural;
-               Increment : Natural;
-               Level_Parameter : constant String := Parameter; -- Calculate Parameter once
+               Moves           : Natural := 0;
+               Minutes         : Natural := 0;
+               Increment       : Natural := 0;
+               Level_Parameter : constant String := Parameter;
             begin
-               Moves     := Natural'Value (Extract_Token_At (Source => Level_Parameter, Token_Number => 1, Delimiter => ' '));
-               Minutes   := Natural'Value (Extract_Token_At (Source => Level_Parameter, Token_Number => 2, Delimiter => ' '));
-               Increment := Natural'Value (Extract_Token_At (Source => Level_Parameter, Token_Number => 3, Delimiter => ' '));
+               -- Extract <moves> <base> <increment>. The base may be a plain
+               -- number of minutes or an "MM:SS" / "M:SS" string (cutechess).
+               begin
+                  Moves := Natural'Value
+                    (Extract_Token_At (Source => Level_Parameter, Token_Number => 1, Delimiter => ' '));
+               exception
+                  when Constraint_Error =>
+                     Moves := 0;
+               end;
+
+               declare
+                  Base_Token : constant String :=
+                    Extract_Token_At (Source => Level_Parameter, Token_Number => 2, Delimiter => ' ');
+                  Has_Colon : Boolean := False;
+               begin
+                  for I in Base_Token'Range loop
+                     if Base_Token (I) = ':' then
+                        Has_Colon := True;
+                        exit;
+                     end if;
+                  end loop;
+
+                  if not Has_Colon then
+                     begin
+                        Minutes := Natural'Value (Base_Token);
+                     exception
+                        when Constraint_Error =>
+                           Minutes := 0;
+                     end;
+                  end if;
+                  -- With "mm:ss" the clock budget is provided by the later
+                  -- "time" command (blitz mode), so Minutes stays 0.
+               end;
+
+               begin
+                  Increment := Natural'Value
+                    (Extract_Token_At (Source => Level_Parameter, Token_Number => 3, Delimiter => ' '));
+               exception
+                  when Constraint_Error =>
+                     Increment := 0;
+               end;
+
                Clock.Set_Level (Moves => Moves, Minutes => Minutes, Increment => Increment);
             exception
                when E : others =>

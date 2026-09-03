@@ -187,10 +187,10 @@ begin
             Force := True;
 
          elsif Cmd = "white" then
-            Engine_Side := Black;
+            Engine_Side := White;
 
          elsif Cmd = "black" then
-            Engine_Side := White;
+            Engine_Side := Black;
 
          elsif Cmd = "go" then
             Force := False;
