@@ -758,12 +758,12 @@ begin
             Engine_Side := Chessboard.Side_To_Move;
 
          when White =>
-            -- Note: This command is deprecated in Winboard protocol v.2
-            Engine_Side := Black;
+            -- Deprecated in Winboard protocol v.2, but some GUIs (cutechess)
+            -- still use it to tell the engine its own color.
+            Engine_Side := White;
 
          when Black =>
-            -- Note: This command is deprecated in Winboard protocol v.2
-            Engine_Side := White;
+            Engine_Side := Black;
 
          when Force =>
             Forcemode := True;
@@ -974,8 +974,17 @@ begin
          when Usage =>
             Usage;
 
+         when Chess.Protocols.Move =>
+            -- Some GUIs (e.g. cutechess) send the opponent move prefixed by
+            -- "move". Treat it exactly like "usermove".
+            Move := Parse_Move (Chessboard, Parameter);
+            Chessboard.Play (Move);
+            if Pondering then
+               Ponder_Hit := (if Ponder_Move = Move then Hit else Miss);
+            end if;
+
          when Usermove =>
-            Move := Parse_Move (Chessboard, Input);
+            Move := Parse_Move (Chessboard, Parameter);
             Chessboard.Play (Move);
             if Pondering then
                Ponder_Hit := (if Ponder_Move = Move then Hit else Miss);

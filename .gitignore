@@ -15,4 +15,5 @@ gnatinspect.*
 books/*
 debug/*
 opt/*
-*.txt
+*.txtobj_bb/
+bin_bb/
