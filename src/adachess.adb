@@ -263,6 +263,161 @@ procedure AdaChess is
 
    Engine : Thinking_Task;
 
+   ---------------------------------------------------------------------
+   -- Buffered console input and interruptible search                 --
+   ---------------------------------------------------------------------
+   --  The console is read by a dedicated task which pushes every line
+   --  into a queue. The main thread can therefore keep reading GUI
+   --  commands while a search is running. This is required to support
+   --  an interruptible analysis: as soon as the GUI changes the
+   --  position, the running search is aborted (via Clock.Interrupt) and
+   --  a new search is started on the updated position. Without this,
+   --  the engine would keep analyzing the old position until the search
+   --  finished, making it impossible for the GUI to navigate the game.
+
+   subtype Line_String is String (1 .. 128);
+
+   type Stored_Line is
+      record
+         Item : Line_String := (others => ' ');
+         Len  : Natural := 0;
+      end record;
+
+   Empty_Line : constant Stored_Line := (Item => (others => ' '), Len => 0);
+
+   type Slots_Array is array (1 .. 256) of Stored_Line;
+
+   protected type Command_Queue_Type is
+      entry Send (Value : in Stored_Line);
+      entry Receive (Value : out Stored_Line);
+      function Peek return Stored_Line;
+   private
+      Slots : Slots_Array;
+      First : Natural := 0;
+      Count : Natural := 0;
+   end Command_Queue_Type;
+
+   protected body Command_Queue_Type is
+      entry Send (Value : in Stored_Line) when Count < Slots'Length is
+      begin
+         Slots ((First + Count) mod Slots'Length + 1) := Value;
+         Count := Count + 1;
+      end Send;
+
+      entry Receive (Value : out Stored_Line) when Count > 0 is
+      begin
+         Value := Slots (First + 1);
+         First := (First + 1) mod Slots'Length;
+         Count := Count - 1;
+      end Receive;
+
+      function Peek return Stored_Line is
+      begin
+         if Count = 0 then
+            return Empty_Line;
+         end if;
+         return Slots (First + 1);
+      end Peek;
+   end Command_Queue_Type;
+
+   Queue : Command_Queue_Type;
+
+   task type Console_Reader_Task is
+   end Console_Reader_Task;
+
+   task body Console_Reader_Task is
+      Buffer : Line_String := (others => ' ');
+      Last   : Natural;
+   begin
+      loop
+         begin
+            Ada.Text_IO.Get_Line (Buffer, Last);
+         exception
+            when Ada.Text_IO.End_Error | Ada.Text_IO.Data_Error =>
+               Buffer := (others => ' ');
+               Buffer (1 .. 4) := "quit";
+               Queue.Send ((Item => Buffer, Len => 4));
+               exit;
+         end;
+         if Last > 0 then
+            Queue.Send ((Item => Buffer, Len => Last));
+         end if;
+      end loop;
+   end Console_Reader_Task;
+
+   Reader : Console_Reader_Task;
+
+   Pending_Input        : Stored_Line := Empty_Line;
+   Reposition_Requested : Boolean := False;
+
+   function Parameter_Of (Source : in String) return String is
+      First_Whitespace : Natural := 0;
+   begin
+      for I in Source'Range loop
+         if Source (I) = ' ' or else Source (I) = ASCII.HT then
+            First_Whitespace := I;
+            exit;
+         end if;
+      end loop;
+      if First_Whitespace = 0 then
+         return "";
+      end if;
+      return Trim (Source (First_Whitespace + 1 .. Source'Last), Whitespace, Both);
+   end Parameter_Of;
+
+   function Command_Is_Interrupting (Cmd : in Protocol_Command_Type) return Boolean is
+     (Cmd /= Ping and Cmd /= Noop);
+
+   procedure Perform_Search (Selected_Move : out Move_Type) is
+      Line_Data : Stored_Line;
+   begin
+      loop
+         select
+            Engine.Answer (Selected_Move);
+            return;
+         or
+            delay 0.02;
+
+            Line_Data := Queue.Peek;
+
+            if Line_Data.Len > 0 then
+               declare
+                  Head_Command : constant Protocol_Command_Type :=
+                    Parse_Input (Extract_Command (Line_Data.Item (1 .. Line_Data.Len)));
+                  Head_Parameter : constant String :=
+                    Parameter_Of (Line_Data.Item (1 .. Line_Data.Len));
+               begin
+                  if Head_Command = Ping then
+                     Queue.Receive (Line_Data);
+                     if Head_Parameter'Length > 0 then
+                        Ada.Text_IO.Put_Line ("pong " & Head_Parameter);
+                     else
+                        Ada.Text_IO.Put_Line ("pong");
+                      end if;
+                      Ada.Text_IO.Flush;
+
+                   elsif Head_Command = Question_Mark then
+                      -- '?' : the GUI asks for the move found so far. Stop
+                      -- the search and answer with the current best move.
+                      Queue.Receive (Line_Data);
+                      Clock.Interrupt;
+
+                  elsif Command_Is_Interrupting (Head_Command) then
+                     -- The GUI changed the position or asked us to stop: abort
+                     -- the running search and let the main loop process the
+                     -- command (a new search will then be started, if needed).
+                     Queue.Receive (Line_Data);
+                     Pending_Input        := Line_Data;
+                     Reposition_Requested := True;
+                     Clock.Interrupt;
+                     return;
+                  end if;
+               end;
+            end if;
+         end select;
+      end loop;
+   end Perform_Search;
+
    Print_Console_Logo : Boolean := False;
 
    Argc               : Natural;
@@ -429,70 +584,73 @@ begin
                   -- Ada.Text_IO.Put_Line ("Extract the move found in pondering");
                   Engine.Answer (Move);
                   -- Ada.Text_IO.Put_Line ("Found move " & Chess.IO.Move_To_String (Move));
-               else
-                  Clock.Interrupt;
-                  Engine.Interrupt_Ponder;
-                  Clear_Transposition_Table;
-                  Clear_Principal_Variation;
-                  Clear_All_Euristics;
-                  -- Ada.Text_IO.Put_Line ("Run thinking again");
-                  Engine.Think (Chessboard);
-                  Engine.Answer (Move);
-               end if;
+                else
+                   Clock.Interrupt;
+                   Engine.Interrupt_Ponder;
+                   Clear_Transposition_Table;
+                   Clear_Principal_Variation;
+                   Clear_All_Euristics;
+                   -- Ada.Text_IO.Put_Line ("Run thinking again");
+                   Reposition_Requested := False;
+                   Engine.Think (Chessboard);
+                   Perform_Search (Move);
+                end if;
 
-            else
-               -- Ada.Text_IO.Put_Line ("Run normal thinking");
-               Engine.Think (Chessboard);
-               Engine.Answer (Move);
-            end if;
-         end if;
+             else
+                Reposition_Requested := False;
+                Engine.Think (Chessboard);
+                Perform_Search (Move);
+             end if;
+          end if;
 
-         if Resign_Mode then
-            if Principal_Variation (Zero_Depth).Evaluation.Score <= Resign_Threshold_Score then
-               Resign_Status := Resign_Status + 1;
-            else
-               Resign_Status := 0;
-            end if;
-         end if;
+          if not Reposition_Requested then
+             if Resign_Mode then
+                if Principal_Variation (Zero_Depth).Evaluation.Score <= Resign_Threshold_Score then
+                   Resign_Status := Resign_Status + 1;
+                else
+                   Resign_Status := 0;
+                end if;
+             end if;
 
-         Chessboard.Play (Move);
+             Chessboard.Play (Move);
 
-         case Communication_Protocol is
-            when Winboard =>
-               Ada.Text_IO.Put ("move ");
-               Print_Move (Move, Pure_Algebraic);
-            when Universal_Chess_Interface =>
-               raise Chess.Not_Implemented with "UCI Protocol is not yet supported in AdaChess";
-            when No_Gui_Connection =>
-               Ada.Text_IO.Put ("move ");
-               Print_Move (Move, Default_Notation);
-         end case;
+             case Communication_Protocol is
+                when Winboard =>
+                   Ada.Text_IO.Put ("move ");
+                   Print_Move (Move, Pure_Algebraic);
+                when Universal_Chess_Interface =>
+                   raise Chess.Not_Implemented with "UCI Protocol is not yet supported in AdaChess";
+                when No_Gui_Connection =>
+                   Ada.Text_IO.Put ("move ");
+                   Print_Move (Move, Default_Notation);
+             end case;
 
-         Ada.Text_IO.New_Line;
-         Ada.Text_IO.Flush;
+             Ada.Text_IO.New_Line;
+             Ada.Text_IO.Flush;
 
-         Pondering := False;
-         Ponder_Move := Empty_Move;
+             Pondering := False;
+             Ponder_Move := Empty_Move;
 
-         if Ponder = On then
-            -- Verify that the prediceted countermove is a valid move. This
-            -- step is required because the aspiration window in search might
-            -- fails and the pv change before the countermove is updated
-            Chessboard.Generate_Moves;
-            for I in Chessboard.Moves_Pointer (Ply) .. Chessboard.Moves_Pointer (Ply + 1) - 1 loop
-               if Chessboard.Moves_Stack (I) = Principal_Variation (Zero_Depth).Predicted_Countermove then
-                  Ponder_Move := Principal_Variation (Zero_Depth).Predicted_Countermove;
-               end if;
-               exit when Ponder_Move /= Empty_Move;
-            end loop;
-         end if;
+             if Ponder = On then
+                -- Verify that the prediceted countermove is a valid move. This
+                -- step is required because the aspiration window in search might
+                -- fails and the pv change before the countermove is updated
+                Chessboard.Generate_Moves;
+                for I in Chessboard.Moves_Pointer (Ply) .. Chessboard.Moves_Pointer (Ply + 1) - 1 loop
+                   if Chessboard.Moves_Stack (I) = Principal_Variation (Zero_Depth).Predicted_Countermove then
+                      Ponder_Move := Principal_Variation (Zero_Depth).Predicted_Countermove;
+                   end if;
+                   exit when Ponder_Move /= Empty_Move;
+                end loop;
+             end if;
 
-         Clear_Principal_Variation;
+             Clear_Principal_Variation;
 
-         if Ponder_Move /= Empty_Move and then Ponder_Move.Check /= Checkmate then
-            Pondering := True;
-            Engine.Ponder (Chessboard => Chessboard, Ponder_Move => Ponder_Move);
-         end if;
+             if Ponder_Move /= Empty_Move and then Ponder_Move.Check /= Checkmate then
+                Pondering := True;
+                Engine.Ponder (Chessboard => Chessboard, Ponder_Move => Ponder_Move);
+             end if;
+          end if;
 
       end if;
 
@@ -517,7 +675,20 @@ begin
 
       Command := Noop;
 
-      Ada.Text_IO.Get_Line (Console_Input, Last);
+      if Pending_Input.Len > 0 then
+         Console_Input (1 .. Pending_Input.Len) := Pending_Input.Item (1 .. Pending_Input.Len);
+         Last := Pending_Input.Len;
+         Pending_Input := Empty_Line;
+      else
+         declare
+            Line_Data : Stored_Line;
+         begin
+            Queue.Receive (Line_Data);
+            Console_Input (1 .. Line_Data.Len) := Line_Data.Item (1 .. Line_Data.Len);
+            Last := Line_Data.Len;
+         end;
+      end if;
+
       if Trim (Console_Input (1 .. last))'Length > 0 then
          Command := Parse_Input (Extract_Command (Console_Input (1 .. Last)));
       end if;
@@ -608,6 +779,13 @@ begin
 
          when Nopost =>
             Principal_Variation_Post := False;
+
+         when Ping =>
+            if Parameter'Length > 0 then
+               Ada.Text_IO.Put_Line ("pong " & Parameter);
+            else
+               Ada.Text_IO.Put_Line ("pong");
+            end if;
 
          when Undo =>
             --  Ply := Ply + 1; -- Adjust for manual undo
@@ -834,6 +1012,7 @@ begin
 
    -- Should not be necessary, but in case, do it the hard way!
    abort Engine;
+   abort Reader;
 
    Ada.Text_IO.Put_Line ("Thanks for playing with AdaChess!");
 
