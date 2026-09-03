@@ -1,8 +1,77 @@
 --
 --  AdaChess-BB : static evaluation (body)
 --
+--  Material plus piece-square tables (PST), stored from each side's own
+--  point of view: rows run from the back rank (row 0) to the enemy side
+--  (row 7). A White piece uses row = Rank_Of(square); a Black piece uses
+--  the mirrored rank, so the same table serves both colors.
+--
 
 package body BBChess.Eval is
+
+   type PST_Table is array (Natural range 0 .. 7, Natural range 0 .. 7)
+     of Score_Type;
+
+   -- Rows: 0 = own back rank, 7 = just before the opponent's back rank.
+   Pawn_PST : constant PST_Table :=
+     ((0, 0, 0, 0, 0, 0, 0, 0),
+      (0, 0, 0, 0, 0, 0, 0, 0),
+      (0, 0, 5, 10, 10, 5, 0, 0),
+      (0, 0, 5, 20, 20, 5, 0, 0),
+      (0, 0, 10, 25, 25, 10, 0, 0),
+      (0, 0, 10, 30, 30, 10, 0, 0),
+      (0, 10, 20, 50, 50, 20, 10, 0),
+      (0, 0, 0, 0, 0, 0, 0, 0));
+
+   Knight_PST : constant PST_Table :=
+     ((-50, -40, -30, -30, -30, -30, -40, -50),
+      (-40, -20, 0, 0, 0, 0, -20, -40),
+      (-30, 0, 10, 15, 15, 10, 0, -30),
+      (-30, 5, 15, 20, 20, 15, 5, -30),
+      (-30, 0, 15, 20, 20, 15, 0, -30),
+      (-30, 5, 10, 15, 15, 10, 5, -30),
+      (-40, -20, 0, 5, 5, 0, -20, -40),
+      (-50, -40, -30, -30, -30, -30, -40, -50));
+
+   Bishop_PST : constant PST_Table :=
+     ((-20, -10, -10, -10, -10, -10, -10, -20),
+      (-10, 0, 0, 0, 0, 0, 0, -10),
+      (-10, 0, 5, 10, 10, 5, 0, -10),
+      (-10, 5, 5, 10, 10, 5, 5, -10),
+      (-10, 0, 10, 10, 10, 10, 0, -10),
+      (-10, 5, 5, 10, 10, 5, 5, -10),
+      (-10, 0, 5, 10, 10, 5, 0, -10),
+      (-20, -10, -10, -10, -10, -10, -10, -20));
+
+   Rook_PST : constant PST_Table :=
+     ((0, 0, 0, 0, 0, 0, 0, 0),
+      (5, 10, 10, 10, 10, 10, 10, 5),
+      (-5, 0, 0, 0, 0, 0, 0, -5),
+      (-5, 0, 0, 0, 0, 0, 0, -5),
+      (-5, 0, 0, 0, 0, 0, 0, -5),
+      (-5, 0, 0, 0, 0, 0, 0, -5),
+      (5, 10, 10, 10, 10, 10, 10, 5),
+      (0, 0, 0, 0, 0, 0, 0, 0));
+
+   Queen_PST : constant PST_Table :=
+     ((-20, -10, -10, -5, -5, -10, -10, -20),
+      (-10, 0, 0, 0, 0, 0, 0, -10),
+      (-10, 0, 5, 5, 5, 5, 0, -10),
+      (-5, 0, 5, 5, 5, 5, 0, -5),
+      (0, 0, 5, 5, 5, 5, 0, -5),
+      (-10, 5, 5, 5, 5, 5, 0, -10),
+      (-10, 0, 5, 0, 0, 0, 0, -10),
+      (-20, -10, -10, -5, -5, -10, -10, -20));
+
+   King_PST : constant PST_Table :=
+     ((20, 30, 10, 0, 0, 10, 30, 20),
+      (-10, -10, 0, 0, 0, 0, -10, -10),
+      (-20, -20, -20, -20, -20, -20, -20, -20),
+      (-30, -30, -30, -30, -30, -30, -30, -30),
+      (-30, -30, -30, -30, -30, -30, -30, -30),
+      (-30, -30, -30, -30, -30, -30, -30, -30),
+      (-40, -40, -40, -40, -40, -40, -40, -40),
+      (-40, -40, -40, -40, -40, -40, -40, -40));
 
    function Piece_Value (Kind : in Kind_Type) return Score_Type is
    begin
@@ -16,52 +85,26 @@ package body BBChess.Eval is
       end case;
    end Piece_Value;
 
-   -- Distance-ish helper: the higher, the closer to the centre files/ranks.
-   function Centre_Score (F, R : in Natural) return Score_Type is
-      D : constant Integer := Abs (2 * F - 7) + Abs (2 * R - 7);
+   function PST (Kind : in Kind_Type; Color : in Color_Type;
+                 Square : in Square_Type) return Score_Type is
+      File_Idx : constant Natural := File_Of (Square);
+      Row      : Natural;
    begin
-      if D <= 4 then
-         return 12 - 2 * D;
+      if Color = White then
+         Row := Rank_Of (Square);
+      else
+         Row := 7 - Rank_Of (Square);
       end if;
-      return 0;
-   end Centre_Score;
 
-   function Positional (Color : in Color_Type; Kind : in Kind_Type;
-                        Square : in Square_Type) return Score_Type
-   is
-      F : constant Natural := File_Of (Square);
-      R : constant Natural := Rank_Of (Square);
-      Result : Score_Type := 0;
-   begin
       case Kind is
-         when Pawn =>
-            -- Advancement: how many ranks the pawn already travelled.
-            declare
-               Advanced : Natural;
-            begin
-               if Color = White then
-                  Advanced := R;
-               else
-                  Advanced := 7 - R;
-               end if;
-               Result := Result + (Advanced - 1) * 6;
-            end;
-            -- Slight preference for central files.
-            if F in 3 .. 4 then
-               Result := Result + 5;
-            end if;
-
-         when Knight | Bishop | Queen =>
-            Result := Result + Centre_Score (F, R);
-
-         when King =>
-            null;
-
-         when Rook =>
-            null;
+         when Pawn   => return Pawn_PST (Row, File_Idx);
+         when Knight => return Knight_PST (Row, File_Idx);
+         when Bishop => return Bishop_PST (Row, File_Idx);
+         when Rook   => return Rook_PST (Row, File_Idx);
+         when Queen  => return Queen_PST (Row, File_Idx);
+         when King   => return King_PST (Row, File_Idx);
       end case;
-      return Result;
-   end Positional;
+   end PST;
 
    function Static (Position : in Position_Type) return Score_Type is
       Result : Score_Type := 0;
@@ -74,14 +117,13 @@ package body BBChess.Eval is
                declare
                   Piece : constant Piece_Type := Make (Color, Kind);
                   B     : Bitboard := Position.Pieces (Piece);
-                  Value : constant Score_Type := Piece_Value (Kind);
                begin
                   while B /= 0 loop
                      declare
                         Sq : constant Square_Type := Lowest_Bit (B);
                      begin
                         Result := Result +
-                          Sign * (Value + Positional (Color, Kind, Sq));
+                          Sign * (Piece_Value (Kind) + PST (Kind, Color, Sq));
                      end;
                      B := B and (B - 1);
                   end loop;
