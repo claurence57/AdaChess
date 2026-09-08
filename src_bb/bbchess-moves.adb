@@ -8,24 +8,15 @@ use BBChess.Hash;
 package body BBChess.Moves is
 
    -- Castle-relevant squares.
-   E1 : constant Square_Type := 4;
    D1 : constant Square_Type := 3;
    F1 : constant Square_Type := 5;
-   G1 : constant Square_Type := 6;
    H1 : constant Square_Type := 7;
    A1 : constant Square_Type := 0;
 
-   E8 : constant Square_Type := 60;
    D8 : constant Square_Type := 59;
    F8 : constant Square_Type := 61;
-   G8 : constant Square_Type := 62;
    H8 : constant Square_Type := 63;
    A8 : constant Square_Type := 56;
-
-   function Is_On (Position : in Position_Type;
-                   Piece    : in Piece_Type;
-                   Square   : in Square_Type) return Boolean is
-     ((Position.Pieces (Piece) and Bit (Square)) /= 0);
 
    ---------------
    -- Rook_From --
@@ -56,28 +47,6 @@ package body BBChess.Moves is
             return (if Flag = King_Side_Castle then F8 else D8);
       end case;
    end Rook_To;
-
-   -------------------------
-   -- Recompute_Castle     --
-   -------------------------
-
-   procedure Recompute_Castle (Position : in out Position_Type) is
-   begin
-      -- A castling right exists only while the king and the relevant rook
-      -- still stand on their home squares.
-      Position.Castle (White, King_Side) :=
-        Is_On (Position, Make (White, King), E1) and
-        Is_On (Position, Make (White, Rook), H1);
-      Position.Castle (White, Queen_Side) :=
-        Is_On (Position, Make (White, King), E1) and
-        Is_On (Position, Make (White, Rook), A1);
-      Position.Castle (Black, King_Side) :=
-        Is_On (Position, Make (Black, King), E8) and
-        Is_On (Position, Make (Black, Rook), H8);
-      Position.Castle (Black, Queen_Side) :=
-        Is_On (Position, Make (Black, King), E8) and
-        Is_On (Position, Make (Black, Rook), A8);
-   end Recompute_Castle;
 
    --------------
    -- Make_Move --
@@ -144,8 +113,41 @@ package body BBChess.Moves is
          end;
       end if;
 
-      -- Castle rights are recomputed from the resulting piece placement.
-      Recompute_Castle (Position);
+      -- Update the castling rights. These are event-driven (a right is lost
+      -- when the king moves, when the home rook moves, or when a home rook
+      -- is captured). They are NOT derived from the board placement: a king
+      -- that left e8 and later returned has no castling rights anymore.
+      declare
+         Moved_King  : constant Boolean := Kind (Move.Piece) = King;
+         Moved_Rook  : constant Boolean := Kind (Move.Piece) = Rook;
+      begin
+         if Moved_King then
+            Position.Castle (Moving, King_Side)  := False;
+            Position.Castle (Moving, Queen_Side) := False;
+         elsif Moved_Rook then
+            case Move.From is
+               when 0 =>  Position.Castle (White, Queen_Side) := False; -- a1
+               when 7 =>  Position.Castle (White, King_Side)  := False; -- h1
+               when 56 => Position.Castle (Black, Queen_Side) := False; -- a8
+               when 63 => Position.Castle (Black, King_Side)  := False; -- h8
+               when others => null;
+            end case;
+         end if;
+
+         if Undo.Has_Captured and then Kind (Undo.Captured) = Rook then
+            declare
+               Cap_Color : constant Color_Type := Color (Undo.Captured);
+            begin
+               case Undo.Captured_Square is
+                  when 0 =>  Position.Castle (White, Queen_Side) := False; -- a1
+                  when 7 =>  Position.Castle (White, King_Side)  := False; -- h1
+                  when 56 => Position.Castle (Black, Queen_Side) := False; -- a8
+                  when 63 => Position.Castle (Black, King_Side)  := False; -- h8
+                  when others => null;
+               end case;
+            end;
+         end if;
+      end;
 
       -- En-passant target square after a double pawn push.
       if Move.Flag = Double_Push then

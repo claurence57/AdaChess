@@ -166,6 +166,43 @@ package body BBChess.Self_Tests is
          Assert (Nodes (P, 2) = 1486, "promo perft d2 must be 1486");
       end;
 
+      -- Castling rights are event-driven: a king that leaves e8 (and later
+      -- returns) must lose both castling rights.
+      declare
+         P : Position_Type;
+         U : Undo_Info;
+      begin
+         Load (P, "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+         Assert (P.Castle (Black, King_Side) and P.Castle (Black, Queen_Side)
+                   and P.Castle (White, King_Side) and P.Castle (White, Queen_Side),
+                 "FEN KQkq must set all four castling rights");
+
+         Make_Move (P, (From => 60, To => 61, Piece => Black_King, Promotion => White_Pawn, Flag => Quiet), U);  -- Ke8-f8
+         Assert (not P.Castle (Black, King_Side)
+                   and not P.Castle (Black, Queen_Side),
+                 "black king move must clear both black rights");
+         Assert (P.Castle (White, King_Side) and P.Castle (White, Queen_Side),
+                 "white rights must be untouched");
+
+         Make_Move (P, (From => 4, To => 5, Piece => White_King, Promotion => White_Pawn, Flag => Quiet), U);    -- Ke1-f1
+         Make_Move (P, (From => 61, To => 60, Piece => Black_King, Promotion => White_Pawn, Flag => Quiet), U);  -- Kf8-e8
+         Assert (not P.Castle (Black, Queen_Side),
+                 "black must NOT castle after returning to e8");
+      end;
+
+      -- A rook leaving its home square clears only that side.
+      declare
+         P : Position_Type;
+         U : Undo_Info;
+      begin
+         Load (P, "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+         Make_Move (P, (From => 0, To => 1, Piece => White_Rook, Promotion => White_Pawn, Flag => Quiet), U);    -- Ra1-b1
+         Assert (not P.Castle (White, Queen_Side),
+                 "white a1 rook move must clear queenside");
+         Assert (P.Castle (White, King_Side),
+                 "white h1 rook move must not clear kingside");
+      end;
+
       Ada.Text_IO.Put_Line ("perft tests OK");
 
       -- Evaluation + search sanity.
