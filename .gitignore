@@ -18,3 +18,4 @@ opt/*
 *.txt
 obj_bb/
 bin_bb/
+*.pgn
