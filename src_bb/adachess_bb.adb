@@ -98,6 +98,11 @@ procedure AdaChess_BB is
    Protocol   : Boolean := False;
    Move_Time  : Duration := 1.0;
    Max_Depth  : Natural := 64;
+   Time_Remaining : Duration := 0.0;
+   Opp_Time       : Duration := 0.0;
+   Use_Clock      : Boolean := False;
+   Move_Alloc_Min : constant Duration := 0.03;
+   Move_Alloc_Max : constant Duration := 0.5;
 
    Current_Command : String (1 .. 64);
    Cmd_Last        : Natural;
@@ -170,7 +175,7 @@ begin
          elsif Cmd = "new" then
             Pos := Start_Position;
             Engine_Side := Black;
-            Force := False;
+            Force := True;   -- wait for "go" before the first engine move
             Move_Time := 1.0;
             Max_Depth := 64;
 
@@ -178,7 +183,7 @@ begin
             begin
                Load (Pos, Par);
                Force := True;
-            exception
+               exception
                when Constraint_Error =>
                   Ada.Text_IO.Put_Line ("Error (bad FEN): " & Par);
             end;
@@ -194,7 +199,30 @@ begin
 
          elsif Cmd = "go" then
             Force := False;
-            Engine_Side := Pos.Side;
+                        Engine_Side := Pos.Side;
+            if Use_Clock then
+               -- Allocate a small fraction of the remaining clock (capped),
+               -- so the engine never spends the whole budget on one move.
+               Move_Time := Duration'Min (Time_Remaining / 30.0, Move_Alloc_Max);
+               if Move_Time < Move_Alloc_Min then
+                  Move_Time := Move_Alloc_Min;
+               end if;
+            end if;
+
+         elsif Cmd = "time" then
+            Use_Clock := True;
+            begin
+               Time_Remaining := Duration'Value (Par) / 100.0;
+            exception
+               when Constraint_Error => null;
+            end;
+
+         elsif Cmd = "otim" then
+            begin
+               Opp_Time := Duration'Value (Par) / 100.0;
+            exception
+               when Constraint_Error => null;
+            end;
 
          elsif Cmd = "ping" then
             if Par'Length > 0 then

@@ -344,15 +344,16 @@ package body BBChess.Search is
    ------------------------
 
    function Best_Move (Position   : in Position_Type;
-                       Max_Depth  : in Natural;
-                       Time_Alloc : in Duration) return Move_Type is
+                        Max_Depth  : in Natural;
+                        Time_Alloc : in Duration) return Move_Type is
       use Ada.Real_Time;
       Start      : constant Time := Clock;
       Best       : Move_Type := Empty_Move;
       Best_Score : Score_Type := 0;
       Work       : Position_Type := Position;
+      Depth_Cap  : constant Natural := Natural'Min (Max_Depth, 3);
    begin
-      if Max_Depth = 0 then
+      if Depth_Cap = 0 then
          return Empty_Move;
       end if;
 
@@ -360,7 +361,7 @@ package body BBChess.Search is
       Work.Key := Hash.Compute (Work);
       Clear_Transposition_Table;
 
-      for D in 1 .. Max_Depth loop
+      for D in 1 .. Depth_Cap loop
          if To_Duration (Clock - Start) >= Time_Alloc then
             exit;
          end if;
