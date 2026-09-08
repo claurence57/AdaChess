@@ -84,7 +84,8 @@ package body BBChess.Movegen is
    procedure Generate_Pseudo_Moves
      (Position : in Position_Type;
       Moves    : out Move_List;
-      Count    : out Natural)
+      Count    : out Natural;
+      Tactical : in Boolean := False)
    is
       Side  : constant Color_Type := Position.Side;
       Opp   : constant Color_Type := Opposite (Side);
@@ -124,23 +125,23 @@ package body BBChess.Movegen is
             declare
                To : constant Square_Type := Square_Type ((R + Forward) * 8 + F);
             begin
-               if (Occ and Bit (To)) = 0 then
-                  if R + Forward = Promo_Rank then
-                     Emit_Promotions (From, To);
-                  else
-                     Add (Moves, Count, From, To, Pawn_Piece);
-                     if R = Start_Rank and then R + 2 * Forward in 0 .. 7 then
-                        declare
-                           To2 : constant Square_Type :=
-                             Square_Type ((R + 2 * Forward) * 8 + F);
-                        begin
-                           if (Occ and Bit (To2)) = 0 then
-                              Add (Moves, Count, From, To2, Pawn_Piece, Double_Push);
-                           end if;
-                        end;
-                     end if;
-                  end if;
-               end if;
+                if (Occ and Bit (To)) = 0 then
+                   if R + Forward = Promo_Rank then
+                      Emit_Promotions (From, To);
+                   elsif not Tactical then
+                      Add (Moves, Count, From, To, Pawn_Piece);
+                      if R = Start_Rank and then R + 2 * Forward in 0 .. 7 then
+                         declare
+                            To2 : constant Square_Type :=
+                              Square_Type ((R + 2 * Forward) * 8 + F);
+                         begin
+                            if (Occ and Bit (To2)) = 0 then
+                               Add (Moves, Count, From, To2, Pawn_Piece, Double_Push);
+                            end if;
+                         end;
+                      end if;
+                   end if;
+                end if;
             end;
          end if;
 
@@ -193,7 +194,10 @@ package body BBChess.Movegen is
          From := Lowest_Bit (Pieces);
          declare
             Targets : Bitboard := Knight_Attacks (From) and not Own;
-         begin
+begin
+             if Tactical then
+                Targets := Targets and Enemy;
+             end if;
             while Targets /= 0 loop
                Add (Moves, Count, From, Lowest_Bit (Targets), Knight_Piece);
                Targets := Targets and (Targets - 1);
@@ -208,7 +212,10 @@ package body BBChess.Movegen is
          From := Lowest_Bit (Pieces);
          declare
             Targets : Bitboard := Bishop_Attacks (From, Occ) and not Own;
-         begin
+begin
+             if Tactical then
+                Targets := Targets and Enemy;
+             end if;
             while Targets /= 0 loop
                Add (Moves, Count, From, Lowest_Bit (Targets), Bishop_Piece);
                Targets := Targets and (Targets - 1);
@@ -223,7 +230,10 @@ package body BBChess.Movegen is
          From := Lowest_Bit (Pieces);
          declare
             Targets : Bitboard := Rook_Attacks (From, Occ) and not Own;
-         begin
+begin
+             if Tactical then
+                Targets := Targets and Enemy;
+             end if;
             while Targets /= 0 loop
                Add (Moves, Count, From, Lowest_Bit (Targets), Rook_Piece);
                Targets := Targets and (Targets - 1);
@@ -238,7 +248,10 @@ package body BBChess.Movegen is
          From := Lowest_Bit (Pieces);
          declare
             Targets : Bitboard := Queen_Attacks (From, Occ) and not Own;
-         begin
+begin
+             if Tactical then
+                Targets := Targets and Enemy;
+             end if;
             while Targets /= 0 loop
                Add (Moves, Count, From, Lowest_Bit (Targets), Queen_Piece);
                Targets := Targets and (Targets - 1);
@@ -251,7 +264,10 @@ package body BBChess.Movegen is
       From := Lowest_Bit (Position.Pieces (King_Piece));
       declare
          Targets : Bitboard := King_Attacks (From) and not Own;
-      begin
+begin
+             if Tactical then
+                Targets := Targets and Enemy;
+             end if;
          while Targets /= 0 loop
             Add (Moves, Count, From, Lowest_Bit (Targets), King_Piece);
             Targets := Targets and (Targets - 1);
@@ -259,7 +275,7 @@ package body BBChess.Movegen is
       end;
 
       -- Castling.
-      if Position.Castle (Side, King_Side) then
+      if not Tactical and then Position.Castle (Side, King_Side) then
          declare
             G : constant Square_Type := (if Side = White then 6 else 62);
             F : constant Square_Type := (if Side = White then 5 else 61);
@@ -274,7 +290,7 @@ package body BBChess.Movegen is
          end;
       end if;
 
-      if Position.Castle (Side, Queen_Side) then
+      if not Tactical and then Position.Castle (Side, Queen_Side) then
          declare
             B : constant Square_Type := (if Side = White then 1 else 57);
             C : constant Square_Type := (if Side = White then 2 else 58);
@@ -295,10 +311,11 @@ package body BBChess.Movegen is
    -- Generate_Legal_Moves --
    ---------------------------
 
-   procedure Generate_Legal_Moves
+   procedure Generate_Legal_Common
      (Position : in Position_Type;
       Moves    : out Move_List;
-      Count    : out Natural)
+      Count    : out Natural;
+      Tactical : in Boolean)
    is
       Pseudo : Move_List;
       P_Count : Natural;
@@ -306,8 +323,7 @@ package body BBChess.Movegen is
       Work   : Position_Type := Position;
    begin
       Count := 0;
-      Generate_Pseudo_Moves (Position, Pseudo, P_Count);
-
+      Generate_Pseudo_Moves (Position, Pseudo, P_Count, Tactical);
 
       for I in 1 .. P_Count loop
          Make_Move (Work, Pseudo (I), Undo);
@@ -317,6 +333,22 @@ package body BBChess.Movegen is
          end if;
          Unmake_Move (Work, Pseudo (I), Undo);
       end loop;
+   end Generate_Legal_Common;
+
+   procedure Generate_Legal_Moves
+     (Position : in Position_Type;
+      Moves    : out Move_List;
+      Count    : out Natural) is
+   begin
+      Generate_Legal_Common (Position, Moves, Count, Tactical => False);
    end Generate_Legal_Moves;
+
+   procedure Generate_Legal_Tactical_Moves
+     (Position : in Position_Type;
+      Moves    : out Move_List;
+      Count    : out Natural) is
+   begin
+      Generate_Legal_Common (Position, Moves, Count, Tactical => True);
+   end Generate_Legal_Tactical_Moves;
 
 end BBChess.Movegen;

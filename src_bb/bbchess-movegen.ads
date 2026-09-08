@@ -32,6 +32,13 @@ package BBChess.Movegen is
       Count    : out Natural);
    -- Fill Moves (1..Count) with every legal move of the side to move.
 
+   procedure Generate_Legal_Tactical_Moves
+     (Position : in Position_Type;
+      Moves    : out Move_List;
+      Count    : out Natural);
+   -- Fill Moves with the legal tactical moves only (captures, en passant,
+   -- promotions). Cheaper than the full generator: used by quiescence.
+
    function King_In_Check (Position : in Position_Type; Color : in Color_Type)
      return Boolean;
    -- True when the king of the given color is attacked by the opponent.

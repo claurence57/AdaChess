@@ -104,9 +104,11 @@ package body BBChess.Search is
    -- Quiescence --
    ----------------
 
+   Quiescence_Limit : constant Natural := 4;
+
    function Quiescence (Position : in out Position_Type;
                         Alpha, Beta : in Score_Type;
-                        Ply        : in Natural) return Score_Type
+                        Ply, Q_Left : in Natural) return Score_Type
    is
       A     : Score_Type := Alpha;
       B     : Score_Type := Beta;
@@ -119,11 +121,17 @@ package body BBChess.Search is
          A := Stand;
       end if;
 
+      -- Hard bound on the quiescence depth: after too many quiet-off
+      -- plies, simply stand pat (avoids search explosions).
+      if Q_Left = 0 then
+         return A;
+      end if;
+
       declare
          Moves : Move_List;
          Count : Natural;
       begin
-         Generate_Legal_Moves (Position, Moves, Count);
+         Generate_Legal_Tactical_Moves (Position, Moves, Count);
 
          for I in 1 .. Count loop
             if Is_Tactical (Position, Moves (I)) then
@@ -132,7 +140,7 @@ package body BBChess.Search is
                   Score : Score_Type;
                begin
                   Make_Move (Position, Moves (I), Undo);
-                  Score := -Quiescence (Position, -B, -A, Ply + 1);
+                  Score := -Quiescence (Position, -B, -A, Ply + 1, Q_Left - 1);
                   Unmake_Move (Position, Moves (I), Undo);
 
                   if Score >= B then
@@ -166,7 +174,7 @@ package body BBChess.Search is
       Best_Score : Score_Type := -Infinity;
    begin
       if Depth = 0 then
-         return Quiescence (Position, A, B, Ply);
+         return Quiescence (Position, A, B, Ply, Quiescence_Limit);
       end if;
 
       -- Transposition table probe.
