@@ -227,6 +227,24 @@ package body BBChess.Search is
          end loop;
       end if;
 
+      -- Tactical moves first (captures, en passant, promotions): they prune
+      -- the alpha-beta tree much earlier than quiet moves.
+      if Count > 2 then
+         declare
+            Next_Tact : Natural := 2;
+            Tmp       : Move_Type;
+         begin
+            for I in 2 .. Count loop
+               if Is_Tactical (Position, Moves (I)) then
+                  Tmp := Moves (Next_Tact);
+                  Moves (Next_Tact) := Moves (I);
+                  Moves (I) := Tmp;
+                  Next_Tact := Next_Tact + 1;
+               end if;
+            end loop;
+         end;
+      end if;
+
       for I in 1 .. Count loop
          declare
             Undo  : Undo_Info;
@@ -359,7 +377,7 @@ package body BBChess.Search is
       Best       : Move_Type := Empty_Move;
       Best_Score : Score_Type := 0;
       Work       : Position_Type := Position;
-      Depth_Cap  : constant Natural := Natural'Min (Max_Depth, 3);
+      Depth_Cap  : constant Natural := Natural'Min (Max_Depth, 5);
    begin
       if Depth_Cap = 0 then
          return Empty_Move;
