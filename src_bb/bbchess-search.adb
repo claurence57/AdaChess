@@ -377,7 +377,7 @@ package body BBChess.Search is
       Best       : Move_Type := Empty_Move;
       Best_Score : Score_Type := 0;
       Work       : Position_Type := Position;
-      Depth_Cap  : constant Natural := Natural'Min (Max_Depth, 5);
+      Depth_Cap  : constant Natural := Natural'Min (Max_Depth, 6);
    begin
       if Depth_Cap = 0 then
          return Empty_Move;

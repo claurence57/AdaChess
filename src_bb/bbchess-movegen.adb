@@ -60,6 +60,95 @@ package body BBChess.Movegen is
       return Is_Attacked (Position, King_Square (Position, Color), Opposite (Color));
    end King_In_Check;
 
+   -----------------
+   -- Pinned mask --
+   -----------------
+
+   -- A piece of Color is "absolutely pinned" when it stands between its own
+   -- king and an enemy sliding piece of matching direction. Such a piece
+   -- cannot move off the pin line without exposing the king.
+   type Pin_Delta is
+      record
+         DF, DR : Integer;
+      end record;
+
+   type Pin_Array is array (1 .. 4) of Pin_Delta;
+   type Pin_Set is array (1 .. 2) of Pin_Array;
+
+   Deltas_All : constant Pin_Set :=
+     (((1, 1), (1, -1), (-1, 1), (-1, -1)),
+      ((1, 0), (-1, 0), (0, 1), (0, -1)));
+
+   function On_Board (F, R : in Integer) return Boolean is
+     (F in 0 .. 7 and R in 0 .. 7);
+
+   function Pin_Mask (Position : in Position_Type; Color : in Color_Type)
+     return Bitboard is
+      King_File : constant Integer := Integer (File_Of
+        (Lowest_Bit (Position.Pieces (Make (Color, King)))));
+      King_Rank : constant Integer := Integer (Rank_Of
+        (Lowest_Bit (Position.Pieces (Make (Color, King)))));
+      Occ  : constant Bitboard := Occupancy (Position);
+      Result : Bitboard := 0;
+   begin
+      -- Dir_Kind 1 = diagonal pins (bishop/queen), 2 = orthogonal (rook/queen).
+      for Dir_Kind in 1 .. 2 loop
+         for D of Deltas_All (Dir_Kind) loop
+            declare
+               First_Seen : Natural := 64;   -- 64 = none (squares are 0..63)
+               Second_Seen : Natural := 64;
+               F : Integer := King_File + D.DF;
+               R : Integer := King_Rank + D.DR;
+            begin
+               while On_Board (F, R) loop
+                  declare
+                     Sq : constant Square_Type := Square_Type (R * 8 + F);
+                  begin
+                     if (Occ and Bit (Sq)) /= 0 then
+                        if First_Seen = 64 then
+                           First_Seen := Sq;
+                        else
+                           Second_Seen := Sq;
+                           exit;
+                        end if;
+                     end if;
+                  end;
+                  F := F + D.DF;
+                  R := R + D.DR;
+               end loop;
+
+               if First_Seen /= 64 and then Second_Seen /= 64 then
+                  declare
+                     Victim : Piece_Type;
+                     Present : Boolean;
+                  begin
+                     Present := Piece_At (Position, Square_Type (First_Seen), Victim);
+                     if Present and then Pieces.Color (Victim) = Color then
+                        declare
+                           Slide : Piece_Type;
+                           P2 : Boolean;
+                        begin
+                           P2 := Piece_At (Position, Square_Type (Second_Seen), Slide);
+                           if P2 and then Pieces.Color (Slide) = Opposite (Color) then
+                              if (Dir_Kind = 1
+                                  and then Kind (Slide) in Bishop | Queen)
+                                or else
+                                (Dir_Kind = 2
+                                 and then Kind (Slide) in Rook | Queen)
+                              then
+                                 Result := Result or Bit (Square_Type (First_Seen));
+                              end if;
+                           end if;
+                        end;
+                     end if;
+                  end;
+               end if;
+            end;
+         end loop;
+      end loop;
+      return Result;
+   end Pin_Mask;
+
    ---------------------
    -- Pseudo move add --
    ---------------------
@@ -317,21 +406,48 @@ begin
       Count    : out Natural;
       Tactical : in Boolean)
    is
-      Pseudo : Move_List;
+      Pseudo  : Move_List;
       P_Count : Natural;
-      Undo   : Undo_Info;
-      Work   : Position_Type := Position;
+      Undo    : Undo_Info;
+      Work    : Position_Type := Position;
+      In_Check : constant Boolean := King_In_Check (Position, Position.Side);
+      Pinned   : Bitboard;
+      Need_Test : Boolean;
    begin
       Count := 0;
       Generate_Pseudo_Moves (Position, Pseudo, P_Count, Tactical);
 
+      -- When the side to move is not in check, a pseudo-legal move can only
+      -- be illegal if it moves the king, an absolutely pinned piece, or an
+      -- en-passant capture. Everything else is legal without further testing.
+      if In_Check then
+         Pinned := 0;
+      else
+         Pinned := Pin_Mask (Position, Position.Side);
+      end if;
+
       for I in 1 .. P_Count loop
-         Make_Move (Work, Pseudo (I), Undo);
-         if not King_In_Check (Work, Position.Side) then
+         if In_Check
+           or else Kind (Pseudo (I).Piece) = King
+           or else Pseudo (I).Flag = En_Passant
+           or else (Bit (Pseudo (I).From) and Pinned) /= 0
+         then
+            Need_Test := True;
+         else
+            Need_Test := False;
+         end if;
+
+         if not Need_Test then
             Count := Count + 1;
             Moves (Count) := Pseudo (I);
+         else
+            Make_Move (Work, Pseudo (I), Undo);
+            if not King_In_Check (Work, Position.Side) then
+               Count := Count + 1;
+               Moves (Count) := Pseudo (I);
+            end if;
+            Unmake_Move (Work, Pseudo (I), Undo);
          end if;
-         Unmake_Move (Work, Pseudo (I), Undo);
       end loop;
    end Generate_Legal_Common;
 
