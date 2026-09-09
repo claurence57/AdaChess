@@ -152,20 +152,50 @@ Résultats mesurés (startpos, ovh02) : depth 7 ≈ 0,25 s, **depth 10 ≈ 6 s**
 Blanc, gain en Noir ; après intégration du movegen épingles du remote : victoires
 2-0).
 
+### 5.4 Chantier 2 : force en recherche (historique, aspiration, extension échec)
+
+Après `1deb991` (SEE), trois leviers du chantier « Force » implémentés dans
+`bbchess-search.adb` :
+
+- **Historique** : une table `History` (par couleur, case départ, case arrivée)
+  récompense les coups tranquilles qui provoquent des beta-cutoffs (bonus
+  `depth²`, plafonné à 850 000) ; les coups tranquilles sont ordonnés par cette
+  valeur après les killers. Réinitialisée entre les parties (`Reset_Search` sur
+  la commande xboard `new`), persistante au sein d'une partie.
+- **Fenêtres d'aspiration** : itération 1 en fenêtre pleine, puis recherche autour
+  du score précédent ± 40 cp ; en cas de fail high/low, la profondeur est
+  re-cherchée en fenêtre pleine (correct et peu coûteux quand la fenêtre tient).
+  `Root_Search` prend désormais une fenêtre `(Alpha, Beta)` et stocke la vraie
+  borne (exacte / inférieure / supérieure) dans la TT.
+- **Extension en échec** : un nœud où le trait est en échec cherche ses évasions
+  un pli de plus (au lieu de basculer directement en quiescence), borné par le
+  pli courant pour ne pas exploser sur une longue suite d'échecs. La quiescence
+  gère aussi proprement l'échec : **pas de stand-pat** quand le roi est en échec
+  (toutes les évasions sont cherchées, les coups tranquilles compris) et
+  **mat/stalemate détectés** à l'horizon (auparavant une position d'échec à
+  l'horizon pouvait être évaluée statiquement comme si de rien n'était).
+
+Résultats mesurés contre MB (`cutechess-cli`, après rebuild) :
+- **1 s+0,1 s** : BB **3-0-3** (aucune défaite ; Elo ≈ +191, LOS ≈ 96 %) —
+  cohérent avec le niveau déjà atteint, confirmé sur 6 parties.
+- **20+1** : **1-1-2** (gain en Noir, défaite en Blanc, 2 nulles par répétition) —
+  plus aucun forfait temps ; BB tient désormais MB à temps long sur cet
+  échantillon (à confirmer avec plus de parties).
+
 ## 6. État actuel & chantiers restants
 
 **Validations** : `./bin_bb/adachess_bb --selftest` passe (perft + roque + éval +
 recherche + **SEE**). Self-tests et perft ne doivent **jamais régresser**.
 
-**Problèmes / chantiers restants (après `11f33f9`)**
-1. **Temps** : les forfaits sous cutechess sont corrigés (recherche interruptible).
-   Reste à **confirmer sur des cadences longues** (20+1, plusieurs parties) et à
-   **tuner l'allocation** si besoin (constantes en tête d'`adachess_bb.adb`).
-2. **Force** : BB tient/bat MB en blitz rapide, mais reste probablement inférieur à
-   temps long. Pistes : movegen « légal direct » complet, **fenêtres
-   d'aspiration**, extension en échec, historique, book d'ouvertures. (Le **SEE**
-   en quiescence est en place depuis `11f33f9` — le tri de la quiescence et des
-   captures pourrait encore l'utiliser plus finement.)
+**Problèmes / chantiers restants (après le chantier 2, cf. § 5.4)**
+1. **Temps** : les forfaits sous cutechess sont corrigés (recherche interruptible) et
+   BB tient MB à 20+1 sur un petit échantillon. Reste à **confirmer sur plus de
+   parties longues** et à **tuner l'allocation** si besoin (constantes en tête
+   d'`adachess_bb.adb`).
+2. **Force** : l'historique, les fenêtres d'aspiration et l'extension en échec sont en
+   place (BB bat MB en blitz, tient à 20+1). Pistes restantes : movegen « légal
+   direct » complet, **book d'ouvertures**, et l'usage du **SEE** pour trier plus
+   finement la quiescence et les captures.
 3. **Évaluation** : constantes à **tuner** (en tête de `bbchess-eval.adb`), et
    éventuellement colonnes ouvertes/semi-ouvertes explicites pour les tours.
 

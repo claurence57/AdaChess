@@ -2,9 +2,11 @@
 --  AdaChess-BB : alpha-beta search
 --
 --  Iterative deepening with a transposition table, PVS, move ordering
---  (hash move, MVV-LVA captures, killers), light LMR, null-move and
---  reverse-futility pruning, and a quiescence search on captures and
---  promotions. Mate/stalemate are detected at the leaves.
+--  (hash move, MVV-LVA captures, killers, history), light LMR, null-move
+--  and reverse-futility pruning, a check extension at the horizon and a
+--  quiescence search on captures and promotions. Mate/stalemate are
+--  detected at the leaves. The timed entry point runs the iteration in
+--  aspiration windows around the previous score.
 --
 
 with BBChess.Pieces;
@@ -30,11 +32,15 @@ package BBChess.Search is
    -- Returns Empty_Move when the side to move has no legal move.
 
    function Best_Move (Position   : in Position_Type;
-                       Max_Depth  : in Natural;
-                       Time_Alloc : in Duration) return Move_Type;
+                        Max_Depth  : in Natural;
+                        Time_Alloc : in Duration) return Move_Type;
    -- Iterative deepening up to Max_Depth that stops at Time_Alloc. The
    -- search is interruptible (the deadline is polled inside the recursion),
    -- so a move is always returned close to the budget even when a single
    -- iteration would need much longer. Used for XBoard play.
+
+   procedure Reset_Search;
+   -- Clear the per-search heuristics (killers and history) between games.
+   -- The position-independent data must not leak from one game to the next.
 
 end BBChess.Search;

@@ -185,6 +185,44 @@ package body BBChess.Search is
       Killers := (others => (others => Empty_Move));
    end Reset_Killers;
 
+   -- History heuristic: a quiet move that repeatedly refutes (beta cutoffs)
+   -- at the same from/to square is tried earlier in later positions. Kept
+   -- per side (moves are relative to the side to move) and bounded so that
+   -- it always ranks below the killers in the ordering.
+   History_Max : constant Score_Type := 850_000;
+   History     : array (Color_Type, Square_Type, Square_Type) of Score_Type :=
+     (others => (others => (others => 0)));
+
+   procedure Reset_History is
+   begin
+      History := (others => (others => (others => 0)));
+   end Reset_History;
+
+   -- History bonus of a quiet move that produced a beta cutoff at Depth.
+   function History_Bonus (Depth : in Natural) return Score_Type is
+      B : Score_Type := Score_Type (Depth) * Score_Type (Depth);
+   begin
+      if B > 64 then
+         B := 64;
+      end if;
+      return B;
+   end History_Bonus;
+
+   procedure Bump_History (Side       : in Color_Type;
+                           From, To   : in Square_Type;
+                           Bonus      : in Score_Type) is
+   begin
+      if History (Side, From, To) <= History_Max - Bonus then
+         History (Side, From, To) := History (Side, From, To) + Bonus;
+      end if;
+   end Bump_History;
+
+   procedure Reset_Search is
+   begin
+      Reset_Killers;
+      Reset_History;
+   end Reset_Search;
+
    function Has_Non_Pawn (Position : in Position_Type; Color : in Color_Type)
      return Boolean is
    begin
@@ -210,7 +248,8 @@ package body BBChess.Search is
    end Captured_Kind;
 
    -- Move ordering score: hash move first, then captures (MVV-LVA), then
-   -- promotions, then the killers, then everything else.
+   -- promotions, then the killers, then quiet moves ordered by the history
+   -- heuristic (moves that already produced beta cutoffs elsewhere).
    function Order (Position   : in Position_Type;
                    Move       : in Move_Type;
                    Hash_Move  : in Move_Type;
@@ -242,7 +281,7 @@ package body BBChess.Search is
             return 900_000;
          end if;
       end if;
-      return 0;
+      return History (Color (Move.Piece), Move.From, Move.To);
    end Order;
 
    ----------------
@@ -253,29 +292,45 @@ package body BBChess.Search is
                         Alpha, Beta : in Score_Type;
                         Ply        : in Natural) return Score_Type
    is
-      A     : Score_Type := Alpha;
-      B     : Score_Type := Beta;
-      Stand : Score_Type := Evaluate (Position);
-      Moves : Move_List;
-      Count : Natural;
+      A        : Score_Type := Alpha;
+      B        : Score_Type := Beta;
+      In_Check : Boolean := King_In_Check (Position, Position.Side);
+      Stand    : Score_Type := 0;
+      Moves    : Move_List;
+      Count    : Natural;
+      Limit    : Natural;
    begin
       Poll_Time;
-      if Stand >= B then
-         return Stand;
-      end if;
-      if Stand > A then
-         A := Stand;
+
+      -- Stand pat is only legal when not in check: a side that is in check
+      -- must play an evasion, so the static evaluation cannot be returned.
+      if not In_Check then
+         Stand := Evaluate (Position);
+         if Stand >= B then
+            return Stand;
+         end if;
+         if Stand > A then
+            A := Stand;
+         end if;
       end if;
 
       Hash.Set_Keys_Enabled (False);
       Generate_Legal_Moves (Position, Moves, Count);
       Hash.Set_Keys_Enabled (True);
 
+      if Count = 0 then
+         if In_Check then
+            return -(Mate_Score - Ply);
+         else
+            -- Stalemate: a draw for the side to move.
+            return 0;
+         end if;
+      end if;
+
       -- Move the tactical moves (captures / promotions) to the front, then
       -- order them by MVV so the most promising captures are tried first.
       declare
-         T        : Natural := 0;
-         In_Check : constant Boolean := King_In_Check (Position, Position.Side);
+         T : Natural := 0;
       begin
          for I in 1 .. Count loop
             if Is_Tactical (Position, Moves (I)) then
@@ -317,7 +372,16 @@ package body BBChess.Search is
             end;
          end loop;
 
-         for I in 1 .. T loop
+         -- When in check every legal move is an evasion and must be tried
+         -- (a quiet king move is a legal answer to a check), not just the
+         -- tactical subset searched in quiet positions.
+         if In_Check then
+            Limit := Count;
+         else
+            Limit := T;
+         end if;
+
+         for I in 1 .. Limit loop
             -- A capture that the static exchange evaluation scores as losing
             -- cannot improve on the stand-pat score, so it is not searched
             -- (promotions and evasions out of check are always kept).
@@ -356,6 +420,9 @@ package body BBChess.Search is
    -- Reverse futility margin at depth 1.
    Futility_Margin : constant Score_Type := 180;
 
+   -- Aspiration window around the previous iteration score (centipawns).
+   Aspiration_Window : constant Score_Type := 40;
+
    -- Null move reduction.
    Null_Reduction  : constant := 2;
 
@@ -367,11 +434,12 @@ package body BBChess.Search is
       B           : Score_Type := Beta;
       Moves       : Move_List;
       Count       : Natural;
-      Hash_Move   : Move_Type := Empty_Move;
-      In_Check    : Boolean := False;
-      Best_Move_Here : Move_Type := Empty_Move;
-      Best_Score  : Score_Type := -Infinity;
-   begin
+       Hash_Move   : Move_Type := Empty_Move;
+       In_Check    : Boolean := False;
+       Best_Move_Here : Move_Type := Empty_Move;
+       Best_Score  : Score_Type := -Infinity;
+       Child_Depth : Natural := 0;
+    begin
       Poll_Time;
       if Depth = 0 then
          return Quiescence (Position, A, B, Ply);
@@ -408,17 +476,27 @@ package body BBChess.Search is
       Generate_Legal_Moves (Position, Moves, Count);
       Hash.Set_Keys_Enabled (True);
 
-      if Count = 0 then
-         if King_In_Check (Position, Position.Side) then
-            return -(Mate_Score - Ply);
-         else
-            return 0;
-         end if;
-      end if;
+       if Count = 0 then
+          if King_In_Check (Position, Position.Side) then
+             return -(Mate_Score - Ply);
+          else
+             return 0;
+          end if;
+       end if;
 
-      if Depth = 1 or else Depth >= 3 then
-         In_Check := King_In_Check (Position, Position.Side);
-      end if;
+       if Depth >= 1 then
+          In_Check := King_In_Check (Position, Position.Side);
+       end if;
+
+       -- Check extension: evasions are forced, so an in-check node is
+       -- searched one ply deeper than a quiet one (a full ply instead of
+       -- going straight into the quiescence search). Bounded by Ply so that
+       -- a long checking sequence cannot explode the search.
+       if In_Check and then Depth >= 1 and then Ply <= Max_Ply - 4 then
+          Child_Depth := Depth;
+       else
+          Child_Depth := Depth - 1;
+       end if;
 
       -- Reverse futility pruning: a quiet, already decisive advantage at the
       -- horizon can be returned without searching.
@@ -495,29 +573,29 @@ package body BBChess.Search is
             begin
                Make_Move (Position, Moves (I), Undo);
 
-               if I = 1 then
-                  Score := -Negamax (Position, Depth - 1, Ply + 1, -B, -A);
-               else
-                  -- PVS: null-window first, re-searched on a fail high.
-                  -- Late quiet moves get a one-ply LMR.
-                  if not Tactical and then Depth >= 3 and then I >= 4
-                    and then not In_Check
-                  then
-                     Score := -Negamax (Position, Depth - 2, Ply + 1,
-                                        -A - 1, -A);
-                     if Score > A and then Score < B then
-                        Score := -Negamax (Position, Depth - 1, Ply + 1,
-                                           -B, -A);
-                     end if;
-                  else
-                     Score := -Negamax (Position, Depth - 1, Ply + 1,
-                                        -A - 1, -A);
-                     if Score > A and then Score < B then
-                        Score := -Negamax (Position, Depth - 1, Ply + 1,
-                                           -B, -A);
-                     end if;
-                  end if;
-               end if;
+                if I = 1 then
+                   Score := -Negamax (Position, Child_Depth, Ply + 1, -B, -A);
+                else
+                   -- PVS: null-window first, re-searched on a fail high.
+                   -- Late quiet moves get a one-ply LMR.
+                   if not Tactical and then Depth >= 3 and then I >= 4
+                     and then not In_Check
+                   then
+                      Score := -Negamax (Position, Child_Depth - 1, Ply + 1,
+                                         -A - 1, -A);
+                      if Score > A and then Score < B then
+                         Score := -Negamax (Position, Child_Depth, Ply + 1,
+                                            -B, -A);
+                      end if;
+                   else
+                      Score := -Negamax (Position, Child_Depth, Ply + 1,
+                                         -A - 1, -A);
+                      if Score > A and then Score < B then
+                         Score := -Negamax (Position, Child_Depth, Ply + 1,
+                                            -B, -A);
+                      end if;
+                   end if;
+                end if;
 
                Unmake_Move (Position, Moves (I), Undo);
 
@@ -525,16 +603,18 @@ package body BBChess.Search is
                   Best_Score := Score;
                   Best_Move_Here := Moves (I);
                end if;
-               if Score >= B then
-                  if not Tactical and then Ply <= Max_Ply then
-                     if Killers (1, Ply) /= Moves (I) then
-                        Killers (2, Ply) := Killers (1, Ply);
-                        Killers (1, Ply) := Moves (I);
-                     end if;
-                  end if;
-                  Store (Position, Depth, Lower_Bound, Score, Best_Move_Here, Ply);
-                  return Score;
-               end if;
+                if Score >= B then
+                   if not Tactical and then Ply <= Max_Ply then
+                      if Killers (1, Ply) /= Moves (I) then
+                         Killers (2, Ply) := Killers (1, Ply);
+                         Killers (1, Ply) := Moves (I);
+                      end if;
+                      Bump_History (Position.Side, Moves (I).From,
+                                    Moves (I).To, History_Bonus (Depth));
+                   end if;
+                   Store (Position, Depth, Lower_Bound, Score, Best_Move_Here, Ply);
+                   return Score;
+                end if;
                if Score > A then
                   A := Score;
                end if;
@@ -562,15 +642,17 @@ package body BBChess.Search is
    -- Root    --
    -------------
 
-   function Root_Search (Position : in out Position_Type;
+   function Root_Search (Position  : in out Position_Type;
                          Depth     : in Natural;
                          Prev_Best : in Move_Type;
+                         Alpha     : in Score_Type;
+                         Beta      : in Score_Type;
                          Best_Score : out Score_Type) return Move_Type
    is
       Root_Moves : Move_List;
       Count      : Natural;
-      Alpha      : Score_Type := -Infinity;
-      Beta       : Score_Type := Infinity;
+      A          : Score_Type := Alpha;
+      B          : Score_Type := Beta;
       Best       : Move_Type := Empty_Move;
       Best_Sc    : Score_Type := -Infinity;
    begin
@@ -620,11 +702,11 @@ package body BBChess.Search is
                Make_Move (Position, Root_Moves (I), Undo);
 
                if I = 1 then
-                  Score := -Negamax (Position, Depth - 1, 1, -Beta, -Alpha);
+                  Score := -Negamax (Position, Depth - 1, 1, -B, -A);
                else
-                  Score := -Negamax (Position, Depth - 1, 1, -Alpha - 1, -Alpha);
-                  if Score > Alpha and then Score < Beta then
-                     Score := -Negamax (Position, Depth - 1, 1, -Beta, -Alpha);
+                  Score := -Negamax (Position, Depth - 1, 1, -A - 1, -A);
+                  if Score > A and then Score < B then
+                     Score := -Negamax (Position, Depth - 1, 1, -B, -A);
                   end if;
                end if;
 
@@ -634,8 +716,13 @@ package body BBChess.Search is
                   Best_Sc := Score;
                   Best    := Root_Moves (I);
                end if;
-               if Score > Alpha then
-                  Alpha := Score;
+               if Score > A then
+                  A := Score;
+               end if;
+               if A >= B then
+                  -- Fail high at the root: a wider window is needed. The
+                  -- move found so far is still a valid candidate.
+                  exit;
                end if;
             end;
          end loop;
@@ -643,7 +730,18 @@ package body BBChess.Search is
 
       if Best /= Empty_Move then
          -- Feed the root best move back to the TT for the next iteration.
-         Store (Position, Depth, Exact, Best_Sc, Best, 0);
+         declare
+            Bound : Bound_Type;
+         begin
+            if Best_Sc >= B then
+               Bound := Lower_Bound;
+            elsif Best_Sc <= Alpha then
+               Bound := Upper_Bound;
+            else
+               Bound := Exact;
+            end if;
+            Store (Position, Depth, Bound, Best_Sc, Best, 0);
+         end;
       end if;
 
       Best_Score := Best_Sc;
@@ -659,6 +757,9 @@ package body BBChess.Search is
       Best       : Move_Type := Empty_Move;
       Best_Score : Score_Type := 0;
       Work       : Position_Type := Position;
+      Alpha      : Score_Type := -Infinity;
+      Beta       : Score_Type := Infinity;
+      Score      : Score_Type;
    begin
       if Depth = 0 then
          return Empty_Move;
@@ -671,7 +772,24 @@ package body BBChess.Search is
       Reset_Killers;
 
       for D in 1 .. Depth loop
-         Best := Root_Search (Work, D, Best, Best_Score);
+         -- Aspiration windows: from the second iteration on, search around
+         -- the previous result. A fail high or low re-searches the depth on
+         -- the full window (kept correct, still cheap when the window holds).
+         if D = 1 then
+            Alpha := -Infinity;
+            Beta  := Infinity;
+            Best := Root_Search (Work, D, Best, Alpha, Beta, Score);
+         else
+            Alpha := Best_Score - Aspiration_Window;
+            Beta  := Best_Score + Aspiration_Window;
+            Best := Root_Search (Work, D, Best, Alpha, Beta, Score);
+            if Score <= Alpha or else Score >= Beta then
+               Alpha := -Infinity;
+               Beta  := Infinity;
+               Best := Root_Search (Work, D, Best, Alpha, Beta, Score);
+            end if;
+         end if;
+         Best_Score := Score;
          exit when Abs (Best_Score) >= Mate_Score - 200;
       end loop;
 
@@ -716,6 +834,9 @@ package body BBChess.Search is
       Best_Score  : Score_Type := 0;
       Work        : Position_Type := Position;
       Completed   : Boolean := False;
+      Alpha       : Score_Type := -Infinity;
+      Beta        : Score_Type := Infinity;
+      Score       : Score_Type;
    begin
       if Max_Depth = 0 then
          return Empty_Move;
@@ -739,7 +860,21 @@ package body BBChess.Search is
                exit;
             end if;
 
-            Best := Root_Search (Work, D, Best, Best_Score);
+            if D = 1 then
+               Alpha := -Infinity;
+               Beta  := Infinity;
+               Best := Root_Search (Work, D, Best, Alpha, Beta, Score);
+            else
+               Alpha := Best_Score - Aspiration_Window;
+               Beta  := Best_Score + Aspiration_Window;
+               Best := Root_Search (Work, D, Best, Alpha, Beta, Score);
+               if Score <= Alpha or else Score >= Beta then
+                  Alpha := -Infinity;
+                  Beta  := Infinity;
+                  Best := Root_Search (Work, D, Best, Alpha, Beta, Score);
+               end if;
+            end if;
+            Best_Score := Score;
             Completed := True;
 
             exit when Abs (Best_Score) >= Mate_Score - 200;

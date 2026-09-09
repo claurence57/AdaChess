@@ -241,15 +241,16 @@ begin
             Ada.Text_IO.Put_Line ("feature done=1");
             Ada.Text_IO.Flush;
 
-         elsif Cmd = "new" then
-            Pos := Start_Position;
-            Engine_Side := Black;
-            Force := False;
-            Fixed_Time := False;
-            Move_Time := 1.0;
-            Clock_Left := 0.0;
-            Time_Increment := 0.0;
-            Max_Depth := 64;
+          elsif Cmd = "new" then
+             Pos := Start_Position;
+             Engine_Side := Black;
+             Force := False;
+             Fixed_Time := False;
+             Move_Time := 1.0;
+             Clock_Left := 0.0;
+             Time_Increment := 0.0;
+             Max_Depth := 64;
+             Reset_Search;
 
          elsif Cmd = "setboard" then
             begin
