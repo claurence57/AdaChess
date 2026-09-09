@@ -1,10 +1,10 @@
 --
 --  AdaChess-BB : alpha-beta search
 --
---  Negamax framework with fail-hard alpha-beta, quiescence search on
---  captures/promotions, and mate/stalemate detection at the leaves.
---  The root simply tries every legal move (single fixed depth for now;
---  iterative deepening + transposition table come next).
+--  Iterative deepening with a transposition table, PVS, move ordering
+--  (hash move, MVV-LVA captures, killers), light LMR, null-move and
+--  reverse-futility pruning, and a quiescence search on captures and
+--  promotions. Mate/stalemate are detected at the leaves.
 --
 
 with BBChess.Pieces;
@@ -32,7 +32,9 @@ package BBChess.Search is
    function Best_Move (Position   : in Position_Type;
                        Max_Depth  : in Natural;
                        Time_Alloc : in Duration) return Move_Type;
-   -- Iterative deepening up to Max_Depth, stopping as soon as Time_Alloc
-   -- has elapsed (checked between iterations). Used for XBoard play.
+   -- Iterative deepening up to Max_Depth that stops at Time_Alloc. The
+   -- search is interruptible (the deadline is polled inside the recursion),
+   -- so a move is always returned close to the budget even when a single
+   -- iteration would need much longer. Used for XBoard play.
 
 end BBChess.Search;

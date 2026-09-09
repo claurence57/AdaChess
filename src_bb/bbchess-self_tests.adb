@@ -3,6 +3,9 @@
 --
 
 with Ada.Text_IO;
+with Ada.Real_Time;
+
+use Ada.Real_Time;
 
 with BBChess.Pieces;
 use BBChess.Pieces;
@@ -208,6 +211,46 @@ package body BBChess.Self_Tests is
       -- Evaluation + search sanity.
       Assert (Evaluate (Start_Position) = 0, "start eval must be 0");
 
+      -- The evaluation must be symmetric: mirroring the board (rank flip +
+      -- color swap) must negate the static score. Exercise the positional
+      -- terms (mobility, bishop pair, rooks on the 7th, passed pawns).
+      declare
+         function Flip_Rank (S : in Square_Type) return Square_Type is
+           (Square_Type ((7 - Rank_Of (S)) * 8 + File_Of (S)));
+
+         procedure Check_Symmetry (Fen : in String) is
+            P : Position_Type;
+            M : Position_Type;
+         begin
+            Load (P, Fen);
+            M.Side := P.Side;
+            for Color in Color_Type loop
+               for Kind in Kind_Type loop
+                  declare
+                     Piece : constant Piece_Type := Make (Color, Kind);
+                     B     : Bitboard := P.Pieces (Piece);
+                  begin
+                     while B /= 0 loop
+                        declare
+                           S : constant Square_Type := Lowest_Bit (B);
+                        begin
+                           Put_Piece (M, Make (Opposite (Color), Kind),
+                                      Flip_Rank (S));
+                        end;
+                        B := B and (B - 1);
+                     end loop;
+                  end;
+               end loop;
+            end loop;
+            Assert (Evaluate (M) = -Evaluate (P),
+                    "eval not symmetric for FEN " & Fen);
+         end Check_Symmetry;
+      begin
+         Check_Symmetry ("4k3/8/8/8/8/8/4P3/4K3 w - - 0 1");
+         Check_Symmetry ("r1bq1rk1/pp3ppp/2n1pn2/2pp4/3P1B2/2NBPN2/PPPQ1PPP/2KR3R w - - 0 1");
+         Check_Symmetry ("4k3/6R1/8/8/8/8/6r1/4K3 w - - 0 1");
+      end;
+
       declare
          Pos   : Position_Type := Start_Position;
          Best  : Move_Type;
@@ -223,9 +266,37 @@ package body BBChess.Self_Tests is
                Found := True;
                exit;
             end if;
+          end loop;
+          Ada.Text_IO.Put_Line ("best move found, legal=" & Boolean'Image (Found));
+          Assert (Found, "Best_Move returned an illegal move");
+       end;
+
+      -- Time management regression test: the timed Best_Move must return a
+      -- legal move promptly, whatever the budget (the interruptible search
+      -- is what keeps the engine from losing on time under a GUI).
+      declare
+         Start_T : constant Time := Clock;
+         Pos     : Position_Type := Start_Position;
+         Best    : Move_Type;
+         List    : Move_List;
+         Count   : Natural;
+         Found   : Boolean := False;
+      begin
+         Ada.Text_IO.Put_Line ("searching with a 0.1s time budget...");
+         Best := Best_Move (Pos, 64, 0.1);
+         Generate_Legal_Moves (Pos, List, Count);
+         for I in 1 .. Count loop
+            if List (I) = Best then
+               Found := True;
+               exit;
+            end if;
          end loop;
-         Ada.Text_IO.Put_Line ("best move found, legal=" & Boolean'Image (Found));
-         Assert (Found, "Best_Move returned an illegal move");
+         Ada.Text_IO.Put_Line
+           ("budgeted move legal=" & Boolean'Image (Found)
+            & ", elapsed=" & Duration'Image (To_Duration (Clock - Start_T)));
+         Assert (Found, "timed Best_Move returned an illegal move");
+         Assert (To_Duration (Clock - Start_T) < 2.0,
+                 "timed Best_Move overran its budget");
       end;
 
       Ada.Text_IO.Put_Line ("all self tests OK");

@@ -1,15 +1,29 @@
 --
 --  AdaChess-BB : static evaluation (body)
 --
---  Material + piece-square tables, plus standard positional terms that are
---  easy to compute on bitboards:
---    * mobility (knights, bishops, rooks, queen)
---    * bishop pair
---    * rooks on (semi-)open files and on the 7th rank
---    * passed pawns
+--  Material plus piece-square tables (PST), stored from each side's own
+--  point of view: rows run from the back rank (row 0) to the enemy side
+--  (row 7). A White piece uses row = Rank_Of(square); a Black piece uses
+--  the mirrored rank, so the same table serves both colors.
 --
---  All terms are symmetric under a vertical mirror, so a balanced start
---  position still evaluates to 0.
+--  The evaluation is "tapered": every positional term is scored for the
+--  opening and for the endgame, then interpolated according to the game
+--  phase (computed from the remaining material). The positional terms,
+--  evaluated per color and mirrored for the opponent, are:
+--    * bishop pair;
+--    * piece mobility (attacked squares, weighted per piece kind);
+--    * rooks on the 7th rank (bonus grows when the enemy king is still on
+--      its back ranks), stronger in the endgame;
+--    * passed pawns (no enemy pawn in front on the same or adjacent files),
+--      worth little in the opening and a lot in the endgame;
+--    * king safety (pawn shelter, open files near the king, pawn storm,
+--      enemy attackers around the king) - opening/middlegame only;
+--    * king endgame activity (the base PST keeps the king at home in the
+--      middlegame; the endgame table drives it toward the center).
+--
+--  Every per-side term uses only color-generic helpers, so subtracting the
+--  White and Black scores keeps the whole evaluation symmetric and equal to
+--  0 on the initial position.
 --
 
 with BBChess.Attacks;
@@ -71,6 +85,7 @@ package body BBChess.Eval is
       (-10, 0, 5, 0, 0, 0, 0, -10),
       (-20, -10, -10, -5, -5, -10, -10, -20));
 
+   -- Middlegame: the king belongs near its castled squares.
    King_PST : constant PST_Table :=
      ((20, 30, 10, 0, 0, 10, 30, 20),
       (-10, -10, 0, 0, 0, 0, -10, -10),
@@ -80,6 +95,17 @@ package body BBChess.Eval is
       (-30, -30, -30, -30, -30, -30, -30, -30),
       (-40, -40, -40, -40, -40, -40, -40, -40),
       (-40, -40, -40, -40, -40, -40, -40, -40));
+
+   -- Endgame: the king must be active and central.
+   King_End_PST : constant PST_Table :=
+     ((-20, -15, -10, -5, -5, -10, -15, -20),
+      (-15, -10, -5, 0, 0, -5, -10, -15),
+      (-10, -5, 0, 5, 5, 0, -5, -10),
+      (-10, 0, 5, 10, 10, 5, 0, -10),
+      (-10, 0, 5, 10, 10, 5, 0, -10),
+      (-10, -5, 0, 5, 5, 0, -5, -10),
+      (-15, -10, -5, 0, 0, -5, -10, -15),
+      (-20, -15, -10, -5, -5, -10, -15, -20));
 
    function Piece_Value (Kind : in Kind_Type) return Score_Type is
    begin
@@ -114,130 +140,362 @@ package body BBChess.Eval is
       end case;
    end PST;
 
-   -----------------
-   -- File / rank --
-   -----------------
-
-   function File_Bits (F : in Natural) return Bitboard is
-      Result : Bitboard := 0;
+   -- Row of Square from the given side's own point of view (same convention
+   -- as the PSTs).
+   function Own_Row (Color : in Color_Type; Sq : in Square_Type) return Natural is
    begin
-      for R in 0 .. 7 loop
-         Result := Result or Bit (Square_Type (R * 8 + F));
-      end loop;
-      return Result;
-   end File_Bits;
+      if Color = White then
+         return Rank_Of (Sq);
+      else
+         return 7 - Rank_Of (Sq);
+      end if;
+   end Own_Row;
 
-   function Rank_Bits (R : in Natural) return Bitboard is
-      Result : Bitboard := 0;
+   -- Pseudo-legal attacks of a piece (sliders take the occupancy into
+   -- account; leapers do not need it).
+   function Piece_Attacks (Kind     : in Kind_Type;
+                           Square   : in Square_Type;
+                           Occupancy : in Bitboard) return Bitboard is
    begin
-      for F in 0 .. 7 loop
-         Result := Result or Bit (Square_Type (R * 8 + F));
-      end loop;
-      return Result;
-   end Rank_Bits;
-
-   -----------------
-   -- Mobility    --
-   -----------------
-
-   function Mobility (Piece : in Piece_Type; Square : in Square_Type;
-                      Position : in Position_Type) return Natural is
-      Occ : constant Bitboard := Occupancy (Position);
-      Own : constant Bitboard := Color_Board (Position, Color (Piece));
-      Attacks : Bitboard;
-   begin
-      case Kind (Piece) is
-         when Knight => Attacks := Knight_Attacks (Square);
-         when Bishop => Attacks := Bishop_Attacks (Square, Occ);
-         when Rook   => Attacks := Rook_Attacks (Square, Occ);
-         when Queen  => Attacks := Queen_Attacks (Square, Occ);
+      case Kind is
+         when Knight => return Knight_Attacks (Square);
+         when Bishop => return Bishop_Attacks (Square, Occupancy);
+         when Rook   => return Rook_Attacks (Square, Occupancy);
+         when Queen  => return Queen_Attacks (Square, Occupancy);
          when others => return 0;
       end case;
-      return Popcount (Attacks and not Own);
-   end Mobility;
+   end Piece_Attacks;
 
-   ----------------
-   -- Rook terms --
-   ----------------
+   ----------------------------------
+   -- Tapered (phase) scores --
+   ----------------------------------
 
-   function Rook_Bonus (Color : in Color_Type; Square : in Square_Type;
-                        Position : in Position_Type) return Score_Type
-   is
-      F     : constant Natural := File_Of (Square);
-      R     : constant Natural := Rank_Of (Square);
-      Own_P : constant Bitboard := Position.Pieces (Make (Color, Pawn));
-      En_P  : constant Bitboard := Position.Pieces (Make (Opposite (Color), Pawn));
-      Has_Own_Pawn  : constant Boolean := (Own_P and File_Bits (F)) /= 0;
-      Has_Enemy_Pawn : constant Boolean := (En_P and File_Bits (F)) /= 0;
-      Rel_Row : constant Natural := (if Color = White then R else 7 - R);
-      Result : Score_Type := 0;
-   begin
-      -- Open / semi-open file.
-      if not Has_Enemy_Pawn then
-         if not Has_Own_Pawn then
-            Result := Result + 14;          -- fully open file
-         else
-            Result := Result + 8;           -- semi-open (enemy side)
-         end if;
-      end if;
+   -- A score is evaluated for the opening (Phase = 100) and for the
+   -- endgame (Phase = 0), then interpolated linearly.
+   type Tapered_Score_Type is
+      record
+         Opening  : Score_Type;
+         End_Game : Score_Type;
+      end record;
 
-      -- Rook on the 7th rank.
-      if Rel_Row = 6 then
-         Result := Result + 18;
-      end if;
-      return Result;
-   end Rook_Bonus;
+   function Both (Value : in Score_Type) return Tapered_Score_Type is
+     ((Value, Value));
 
-   ----------------
-   -- Passed pawn --
-   ----------------
+   function "+" (L, R : in Tapered_Score_Type) return Tapered_Score_Type is
+     ((L.Opening + R.Opening, L.End_Game + R.End_Game));
 
-   function Pawn_Is_Passed (Color : in Color_Type;
-                            Position : in Position_Type;
-                            F, R : in Natural) return Boolean
-   is
-      En_P : constant Bitboard := Position.Pieces (Make (Opposite (Color), Pawn));
-      Lo   : constant Natural := (if F = 0 then 0 else F - 1);
-      Hi   : constant Natural := (if F = 7 then 7 else F + 1);
-   begin
-      for FF in Lo .. Hi loop
-         if Color = White then
-            for R2 in R + 1 .. 7 loop
-               if (En_P and Bit (Square_Type (R2 * 8 + FF))) /= 0 then
-                  return False;
-               end if;
-            end loop;
-         else
-            for R2 in 0 .. R - 1 loop
-               if (En_P and Bit (Square_Type (R2 * 8 + FF))) /= 0 then
-                  return False;
-               end if;
-            end loop;
-         end if;
-      end loop;
-      return True;
-   end Pawn_Is_Passed;
-
-   function Passed_Bonus (Color : in Color_Type; R : in Natural)
+   function Blend (Score : in Tapered_Score_Type; Phase : in Natural)
      return Score_Type is
-      Rel_Row : constant Natural := (if Color = White then R else 7 - R);
    begin
-      if Rel_Row >= 5 then
-         return 50;
-      elsif Rel_Row >= 3 then
-         return 25;
-      else
-         return 10;
+      return (Score.Opening * Phase + Score.End_Game * (100 - Phase)) / 100;
+   end Blend;
+
+   -- Game phase from the remaining material (0 = pure endgame,
+   -- 100 = full opening). Mirrors the classic phase count.
+   function Game_Phase (Position : in Position_Type) return Natural is
+      P : Natural := 0;
+   begin
+      for Color in Color_Type loop
+         P := P + 4 * Popcount (Position.Pieces (Make (Color, Knight)));
+         P := P + 4 * Popcount (Position.Pieces (Make (Color, Bishop)));
+         P := P + 9 * Popcount (Position.Pieces (Make (Color, Rook)));
+         P := P + 16 * Popcount (Position.Pieces (Make (Color, Queen)));
+      end loop;
+      if P > 100 then
+         P := 100;
       end if;
-   end Passed_Bonus;
+      return P;
+   end Game_Phase;
+
+   --------------------------
+   -- Positional constants --
+   --------------------------
+
+   Bishop_Pair_Opening : constant Score_Type := 20;
+   Bishop_Pair_Endgame : constant Score_Type := 45;
+
+   -- Mobility: centipawns per attacked (reachable) square, per piece kind.
+   Mobility_N : constant Score_Type := 4;
+   Mobility_B : constant Score_Type := 4;
+   Mobility_R : constant Score_Type := 2;
+   Mobility_Q : constant Score_Type := 1;
+
+   Rook_On_7th_Opening : constant Score_Type := 15;
+   Rook_On_7th_Endgame : constant Score_Type := 35;
+   -- Extra bonus when the enemy king is still close to its back ranks.
+   Rook_On_7th_King    : constant Score_Type := 25;
+
+   -- Passed pawn bonus indexed by the pawn "own row" (0 = back rank).
+   -- Row 0 and 7 are unreachable for a pawn, hence 0.
+   Passed_Pawn_Opening : constant array (Natural range 0 .. 7) of Score_Type :=
+     (0, 5, 8, 12, 16, 22, 30, 0);
+   Passed_Pawn_Endgame : constant array (Natural range 0 .. 7) of Score_Type :=
+     (0, 12, 22, 38, 60, 90, 130, 0);
+
+   -- King safety.
+   Pawn_Shield_Row1      : constant Score_Type := 8;
+   Pawn_Shield_Row2      : constant Score_Type := 6;
+   Pawn_Shield_Row3      : constant Score_Type := 3;
+   Open_File_Near_King   : constant Score_Type := 10;
+   Pawn_Storm            : constant Score_Type := 3;
+   King_Attack_Knight    : constant Score_Type := 5;
+   King_Attack_Bishop    : constant Score_Type := 5;
+   King_Attack_Rook      : constant Score_Type := 8;
+   King_Attack_Queen     : constant Score_Type := 12;
+   King_Safety_Min_Phase : constant Natural := 20;
+   -- Below this phase, king safety is irrelevant (its weight is ~0 anyway)
+   -- and is not even computed, which keeps the endgame evaluation cheap.
+
+   --------------------
+   -- King safety --
+   --------------------
+
+   -- Opening/middlegame safety of Color's king. Positive when the king is
+   -- well sheltered, negative when it is exposed / under attack.
+   function King_Safety (Position : in Position_Type; Color : in Color_Type)
+     return Score_Type
+   is
+      Enemy    : constant Color_Type := Opposite (Color);
+      Occ      : constant Bitboard := Occupancy (Position);
+      King_Sq  : constant Square_Type :=
+        Lowest_Bit (Position.Pieces (Make (Color, King)));
+      King_File : constant Natural := File_Of (King_Sq);
+      Zone     : constant Bitboard := King_Attacks (King_Sq);
+      Result   : Score_Type := 0;
+      Lo, Hi   : Integer;
+      B        : Bitboard;
+   begin
+      -- Weighted enemy attackers aiming at the squares around our king.
+      for Kind in Knight .. Queen loop
+         declare
+            Pieces : Bitboard := Position.Pieces (Make (Enemy, Kind));
+         begin
+            while Pieces /= 0 loop
+               declare
+                  Sq  : constant Square_Type := Lowest_Bit (Pieces);
+                  Att : constant Bitboard := Piece_Attacks (Kind, Sq, Occ);
+               begin
+                  if (Att and Zone) /= 0 then
+                     case Kind is
+                        when Knight => Result := Result - King_Attack_Knight;
+                        when Bishop => Result := Result - King_Attack_Bishop;
+                        when Rook   => Result := Result - King_Attack_Rook;
+                        when Queen  => Result := Result - King_Attack_Queen;
+                        when others => null;
+                     end case;
+                  end if;
+               end;
+               Pieces := Pieces and (Pieces - 1);
+            end loop;
+         end;
+      end loop;
+
+      -- Pawn shield / open files / pawn storm, only for a wing (castled or
+      -- edge) king. A central king gets no shelter but is already punished
+      -- by the king PST.
+      if King_File <= 1 then
+         Lo := 0;
+         Hi := 2;
+      elsif King_File >= 6 then
+         Lo := 5;
+         Hi := 7;
+      else
+         Lo := 1;
+         Hi := 0;   -- empty range: no wing
+      end if;
+
+      if Lo <= Hi then
+         declare
+            Has_Pawn  : array (0 .. 7) of Boolean := (others => False);
+            Front_Row : array (0 .. 7) of Natural := (others => 9);
+         begin
+            B := Position.Pieces (Make (Color, Pawn));
+            while B /= 0 loop
+               declare
+                  S : constant Square_Type := Lowest_Bit (B);
+                  F : constant Natural := File_Of (S);
+                  R : constant Natural := Own_Row (Color, S);
+               begin
+                  Has_Pawn (F) := True;
+                  if R < Front_Row (F) then
+                     Front_Row (F) := R;
+                  end if;
+               end;
+               B := B and (B - 1);
+            end loop;
+
+            for F in Lo .. Hi loop
+               if Has_Pawn (F) then
+                  case Front_Row (F) is
+                     when 1 => Result := Result + Pawn_Shield_Row1;
+                     when 2 => Result := Result + Pawn_Shield_Row2;
+                     when 3 => Result := Result + Pawn_Shield_Row3;
+                     when others => null;
+                  end case;
+               else
+                  Result := Result - Open_File_Near_King;
+               end if;
+            end loop;
+
+            -- Advanced enemy pawns storming the wing.
+            B := Position.Pieces (Make (Enemy, Pawn));
+            while B /= 0 loop
+               declare
+                  S : constant Square_Type := Lowest_Bit (B);
+                  F : constant Natural := File_Of (S);
+                  R : constant Natural := Own_Row (Color, S);
+               begin
+                  if F in Lo .. Hi and then R in 3 .. 5 then
+                     Result := Result - Pawn_Storm;
+                  end if;
+               end;
+               B := B and (B - 1);
+            end loop;
+         end;
+      end if;
+
+      return Result;
+   end King_Safety;
+
+   -------------------------
+   -- Positional (per side) --
+   -------------------------
+
+   -- Positional score of one side (positive for that side), split between
+   -- the opening and the endgame values. Color-generic, so calling it with
+   -- White then Black and subtracting stays symmetric.
+   function Positional_Score (Position : in Position_Type;
+                              Color    : in Color_Type;
+                              Phase    : in Natural) return Tapered_Score_Type
+   is
+      Enemy  : constant Color_Type := Opposite (Color);
+      Occ    : constant Bitboard := Occupancy (Position);
+      Own    : constant Bitboard := Color_Board (Position, Color);
+      Free   : constant Bitboard := not Own;
+      Result : Tapered_Score_Type := (Opening => 0, End_Game => 0);
+      B      : Bitboard;
+   begin
+      -- Bishop pair.
+      if Popcount (Position.Pieces (Make (Color, Bishop))) = 2 then
+         Result := Result +
+           (Opening => Bishop_Pair_Opening, End_Game => Bishop_Pair_Endgame);
+      end if;
+
+      -- Mobility (and the special rook-on-7th bonus).
+      for Kind in Knight .. Queen loop
+         declare
+            Weight : constant Score_Type :=
+              (case Kind is
+                  when Knight => Mobility_N,
+                  when Bishop => Mobility_B,
+                  when Rook   => Mobility_R,
+                  when Queen  => Mobility_Q,
+                  when others => 0);
+         begin
+            B := Position.Pieces (Make (Color, Kind));
+            while B /= 0 loop
+               declare
+                  Sq  : constant Square_Type := Lowest_Bit (B);
+                  Cnt : constant Natural :=
+                    Popcount (Piece_Attacks (Kind, Sq, Occ) and Free);
+               begin
+                  Result := Result + Both (Weight * Score_Type (Cnt));
+
+                  if Kind = Rook and then Own_Row (Color, Sq) = 6 then
+                     Result := Result +
+                       (Opening => Rook_On_7th_Opening,
+                        End_Game => Rook_On_7th_Endgame);
+                     declare
+                        Enemy_King : constant Square_Type :=
+                          Lowest_Bit (Position.Pieces (Make (Enemy, King)));
+                     begin
+                        if Own_Row (Enemy, Enemy_King) <= 1 then
+                           Result := Result + Both (Rook_On_7th_King);
+                        end if;
+                     end;
+                  end if;
+               end;
+               B := B and (B - 1);
+            end loop;
+         end;
+      end loop;
+
+      -- Passed pawns.
+      declare
+         Enemy_Pawn_Sq : array (1 .. 8) of Square_Type;
+         Enemy_Pawn_N  : Natural := 0;
+      begin
+         B := Position.Pieces (Make (Enemy, Pawn));
+         while B /= 0 loop
+            Enemy_Pawn_N := Enemy_Pawn_N + 1;
+            Enemy_Pawn_Sq (Enemy_Pawn_N) := Lowest_Bit (B);
+            B := B and (B - 1);
+         end loop;
+
+         B := Position.Pieces (Make (Color, Pawn));
+         while B /= 0 loop
+            declare
+               Sq     : constant Square_Type := Lowest_Bit (B);
+               R      : constant Natural := Rank_Of (Sq);
+               F      : constant Natural := File_Of (Sq);
+               Row    : constant Natural := Own_Row (Color, Sq);
+               Passed : Boolean := True;
+            begin
+               for I in 1 .. Enemy_Pawn_N loop
+                  declare
+                     E_R  : constant Natural := Rank_Of (Enemy_Pawn_Sq (I));
+                     E_F  : constant Natural := File_Of (Enemy_Pawn_Sq (I));
+                     Diff : constant Integer := Integer (E_F) - Integer (F);
+                  begin
+                     if Diff in -1 .. 1 then
+                        if (Color = White and E_R > R)
+                          or (Color = Black and E_R < R)
+                        then
+                           Passed := False;
+                           exit;
+                        end if;
+                     end if;
+                  end;
+               end loop;
+
+               if Passed then
+                  Result := Result +
+                    (Opening => Passed_Pawn_Opening (Row),
+                     End_Game => Passed_Pawn_Endgame (Row));
+               end if;
+            end;
+            B := B and (B - 1);
+         end loop;
+      end;
+
+      -- King: endgame activity replaces the home-oriented PST.
+      declare
+         King_Sq : constant Square_Type :=
+           Lowest_Bit (Position.Pieces (Make (Color, King)));
+         K_Row   : constant Natural := Own_Row (Color, King_Sq);
+         K_File  : constant Natural := File_Of (King_Sq);
+      begin
+         Result := Result +
+           (Opening => 0,
+            End_Game => King_End_PST (K_Row, K_File) - PST (King, Color, King_Sq));
+      end;
+
+      -- King safety (middlegame only).
+      if Phase >= King_Safety_Min_Phase then
+         Result := Result + Both (King_Safety (Position, Color));
+      end if;
+
+      return Result;
+   end Positional_Score;
 
    function Static (Position : in Position_Type) return Score_Type is
       Result : Score_Type := 0;
+      Phase  : constant Natural := Game_Phase (Position);
    begin
+      -- Material + piece-square tables (flat, both phases).
       for Color in Color_Type loop
          declare
             Sign : constant Score_Type := (if Color = White then 1 else -1);
-            Bishop_Count : Natural := 0;
          begin
             for Kind in Kind_Type loop
                declare
@@ -246,38 +504,31 @@ package body BBChess.Eval is
                begin
                   while B /= 0 loop
                      declare
-                        Sq  : constant Square_Type := Lowest_Bit (B);
-                        Ext : Score_Type := 0;
+                        Sq : constant Square_Type := Lowest_Bit (B);
                      begin
-                        if Kind = Knight or Kind = Bishop then
-                           Ext := Ext + 3 * Mobility (Piece, Sq, Position);
-                        elsif Kind = Rook then
-                           Ext := Ext + 2 * Mobility (Piece, Sq, Position)
-                             + Rook_Bonus (Color, Sq, Position);
-                        elsif Kind = Queen then
-                           Ext := Ext + 1 * Mobility (Piece, Sq, Position);
-                        elsif Kind = Pawn then
-                           if Pawn_Is_Passed (Color, Position,
-                                              File_Of (Sq), Rank_Of (Sq)) then
-                              Ext := Ext + Passed_Bonus (Color, Rank_Of (Sq));
-                           end if;
-                        end if;
-                        if Kind = Bishop then
-                           Bishop_Count := Bishop_Count + 1;
-                        end if;
-                        Result := Result + Sign *
-                          (Piece_Value (Kind) + PST (Kind, Color, Sq) + Ext);
+                        Result := Result +
+                          Sign * (Piece_Value (Kind) + PST (Kind, Color, Sq));
                      end;
                      B := B and (B - 1);
                   end loop;
                end;
             end loop;
-
-            if Bishop_Count >= 2 then
-               Result := Result + Sign * 25;    -- bishop pair
-            end if;
          end;
       end loop;
+
+      -- Positional terms, tapered by the game phase.
+      declare
+         White_Positional : constant Tapered_Score_Type :=
+           Positional_Score (Position, White, Phase);
+         Black_Positional : constant Tapered_Score_Type :=
+           Positional_Score (Position, Black, Phase);
+         Diff : constant Tapered_Score_Type :=
+           (Opening  => White_Positional.Opening - Black_Positional.Opening,
+            End_Game => White_Positional.End_Game - Black_Positional.End_Game);
+      begin
+         Result := Result + Blend (Diff, Phase);
+      end;
+
       return Result;
    end Static;
 

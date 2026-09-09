@@ -1,9 +1,12 @@
 --
 --  AdaChess-BB : static evaluation
 --
---  A deliberately simple evaluation: material plus a few positional
---  heuristics (pawn advancement, piece centralization). Scores are in
---  centipawns, positive from White's point of view.
+--  Material + piece-square tables, tapered by the game phase (opening /
+--  endgame interpolation) and completed by positional terms: bishop pair,
+--  piece mobility, rooks on the 7th rank, passed pawns, king safety and
+--  king endgame activity. Scores are in centipawns, positive from White's
+--  point of view. Every term is evaluated per color and mirrored, so the
+--  evaluation is symmetric and returns 0 on the initial position.
 --
 
 with BBChess.Pieces;
