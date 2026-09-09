@@ -182,12 +182,47 @@ Résultats mesurés contre MB (`cutechess-cli`, après rebuild) :
   plus aucun forfait temps ; BB tient désormais MB à temps long sur cet
   échantillon (à confirmer avec plus de parties).
 
+### 5.5 Chantier 3 : évaluation plus riche et plus rapide
+
+Deux volets menés dans `bbchess-eval.adb`, validés par le self-test (symétrie
+conservée : éval de départ = 0, miroir ⇒ `-Eval`) et par mini-matchs.
+
+**Termes d'évaluation ajoutés**
+- **Colonnes ouvertes / semi-ouvertes pour les tours** : une tour sans pion ami
+  sur sa colonne est récompensée (file totalement ouverte : ~22/16 cp ; file
+  semi-ouverte : ~10/6 cp, ouverture/finale). Détection par masque `File_Mask`
+  sur les pions des deux couleurs.
+- **Structure de pions** :
+  * pions **doublés** (pénalité par pion excédentaire sur une colonne) ;
+  * pions **isolés** (aucun pion ami sur les colonnes adjacentes) ;
+  * bonus renforcé pour les **pions passés liés** (+50 % du bonus de pion passé)
+    quand un pion ami est sur une colonne adjacente à une case d'écart.
+
+**Accélération / exploitation bitboard** — une partie 1 s+0,1 s profilée montrait
+l'éval à **~50-55 % du temps de recherche** (~1,1 M appels/partie), premier poste
+de coût. Corrections :
+- `Occupancy` calculée **une seule fois** par `Static` et passée en paramètre à
+  `Positional_Score` puis `King_Safety` (auparavant recalculée 1×/couleur puis de
+  nouveau dans chaque `King_Safety`).
+- Case du roi adverse **hissée** hors de la boucle des tours (elle était
+  re-dérivée par `Lowest_Bit` à chaque tour).
+- **Pions passés par bitboard** : fonction `Passed_Pawns` avec masques
+  pré-calculés `Above_Rank`/`Below_Rank` + `Front_Files` (3 colonnes), au lieu de
+  la double boucle alliés × ennemis.
+- **Doublés / isolés** dérivés de comptages par colonne (`File_Mask`) plutôt que
+  de listes de cases ; **pions passés liés** testés sur voisins bitboard.
+- Tables `Rank_Mask`, `Above_Rank`, `Below_Rank`, `Front_Files` pré-calculées en
+  tête de fichier.
+
+Résultats mesurés contre MB (blitz 1 s+0,1 s, après rebuild) : BB **4-1-1** puis
+**2-0-4** selon les graines — aucune défaite, BB ≥ MB, niveau cohérent avec § 5.4.
+
 ## 6. État actuel & chantiers restants
 
 **Validations** : `./bin_bb/adachess_bb --selftest` passe (perft + roque + éval +
 recherche + **SEE**). Self-tests et perft ne doivent **jamais régresser**.
 
-**Problèmes / chantiers restants (après le chantier 2, cf. § 5.4)**
+**Problèmes / chantiers restants (après les chantiers 2 & 3, cf. § 5.4 / § 5.5)**
 1. **Temps** : les forfaits sous cutechess sont corrigés (recherche interruptible) et
    BB tient MB à 20+1 sur un petit échantillon. Reste à **confirmer sur plus de
    parties longues** et à **tuner l'allocation** si besoin (constantes en tête
@@ -196,8 +231,12 @@ recherche + **SEE**). Self-tests et perft ne doivent **jamais régresser**.
    place (BB bat MB en blitz, tient à 20+1). Pistes restantes : movegen « légal
    direct » complet, **book d'ouvertures**, et l'usage du **SEE** pour trier plus
    finement la quiescence et les captures.
-3. **Évaluation** : constantes à **tuner** (en tête de `bbchess-eval.adb`), et
-   éventuellement colonnes ouvertes/semi-ouvertes explicites pour les tours.
+3. **Évaluation** : colonnes ouvertes, structure de pions et accélérations (§ 5.5)
+   sont en place. Reste à **tuner les constantes** (tête de `bbchess-eval.adb`) et,
+   pour aller plus loin, ajouter **pions passés protégés/éloignés, tours connectées,
+   cases fortes (outposts), bonus de tempo**, ou passer à une évaluation
+   **incrémentale** (le profil montre que l'éval reste ~50 % du temps de recherche,
+   même optimisée).
 
 **Commandes utiles (Linux/ovh02)**
 ```bash

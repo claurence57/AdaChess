@@ -370,8 +370,8 @@ begin
          then
             null;
 
-         elsif Cmd = "quit" or else Cmd = "exit" then
-            exit Main_Loop;
+          elsif Cmd = "quit" or else Cmd = "exit" then
+             exit Main_Loop;
 
          else
             -- Try to interpret the line as a raw coordinate move (console
