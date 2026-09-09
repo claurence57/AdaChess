@@ -72,6 +72,12 @@ Décisions structurantes :
 - `28c8435` — **Ordonnancement** des coups (tactiques d'abord) ; profondeur par coup
   portée à 5.
 - `2524768` — profondeur par coup portée à **6**.
+- *(après `11f33f9`)* — **SEE** (Static Exchange Evaluation) : package
+  `BBChess.See` (`bbchess-see`) qui évalue la séquence de captures sur une case
+  (attaquant le moins cher d'abord, **épingles exclues**, roi seulement en dernier
+  attaquant, renoncement possible). Utilisé dans la **quiescence** pour ne pas
+  chercher les captures **perdantes** (SEE < 0), sauf promotions et évasions sous
+  échec — réduit l'arbre et évite les échanges perdants à l'horizon.
 
 ### Évaluation
 - `e6c1268` — tables **pièce-case (PST)**.
@@ -149,15 +155,17 @@ Blanc, gain en Noir ; après intégration du movegen épingles du remote : victo
 ## 6. État actuel & chantiers restants
 
 **Validations** : `./bin_bb/adachess_bb --selftest` passe (perft + roque + éval +
-recherche). Self-tests et perft ne doivent **jamais régresser**.
+recherche + **SEE**). Self-tests et perft ne doivent **jamais régresser**.
 
 **Problèmes / chantiers restants (après `11f33f9`)**
 1. **Temps** : les forfaits sous cutechess sont corrigés (recherche interruptible).
    Reste à **confirmer sur des cadences longues** (20+1, plusieurs parties) et à
    **tuner l'allocation** si besoin (constantes en tête d'`adachess_bb.adb`).
 2. **Force** : BB tient/bat MB en blitz rapide, mais reste probablement inférieur à
-   temps long. Pistes : movegen « légal direct » complet, **SEE**, fenêtres
-   d'aspiration, extension en échec, historique, book d'ouvertures.
+   temps long. Pistes : movegen « légal direct » complet, **fenêtres
+   d'aspiration**, extension en échec, historique, book d'ouvertures. (Le **SEE**
+   en quiescence est en place depuis `11f33f9` — le tri de la quiescence et des
+   captures pourrait encore l'utiliser plus finement.)
 3. **Évaluation** : constantes à **tuner** (en tête de `bbchess-eval.adb`), et
    éventuellement colonnes ouvertes/semi-ouvertes explicites pour les tours.
 

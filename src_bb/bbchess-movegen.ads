@@ -48,4 +48,10 @@ package BBChess.Movegen is
                          By       : in Color_Type) return Boolean;
    -- True when Square is attacked by any piece of color By.
 
+   function Pin_Mask (Position : in Position_Type; Color : in Color_Type)
+     return Bitboard;
+   -- Bitboard of the pieces of Color that are absolutely pinned: they stand
+   -- between their own king and an enemy slider of matching direction, so
+   -- they cannot legally move off the pin line.
+
 end BBChess.Movegen;

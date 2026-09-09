@@ -31,6 +31,9 @@ use BBChess.Perft;
 with BBChess.Eval;
 use BBChess.Eval;
 
+with BBChess.See;
+use BBChess.See;
+
 with BBChess.Search;
 use BBChess.Search;
 
@@ -297,6 +300,52 @@ package body BBChess.Self_Tests is
          Assert (Found, "timed Best_Move returned an illegal move");
          Assert (To_Duration (Clock - Start_T) < 2.0,
                  "timed Best_Move overran its budget");
+      end;
+
+      -- Static exchange evaluation: undefended pieces, recaptures, losing
+      -- lines and pinned defenders must be scored consistently.
+      declare
+         function See (Fen : in String; Move : in Move_Type) return Score_Type is
+            P : Position_Type;
+         begin
+            Load (P, Fen);
+            return Static_Exchange_Value (P, Move);
+         end See;
+      begin
+         -- b4xa5 : pawn wins an undefended rook.
+         Assert (See ("7k/8/8/r7/1P6/8/8/7K w - - 0 1",
+                      (From => 25, To => 32, Piece => White_Pawn,
+                       Promotion => White_Pawn, Flag => Quiet)) = 500,
+                 "SEE b4xa5 must be +500 (undefended rook)");
+
+         -- g5xf6 : pawn takes a defended pawn, the recapture leads to an
+         -- even trade (0).
+         Assert (See ("7k/4p3/5p2/6P1/8/8/8/7K w - - 0 1",
+                      (From => 38, To => 45, Piece => White_Pawn,
+                       Promotion => White_Pawn, Flag => Quiet)) = 0,
+                 "SEE g5xf6 must be 0 (equal trade)");
+
+         -- Nxe4 : a knight capturing a pawn defended by a pawn loses the
+         -- exchange (-220).
+         Assert (See ("7k/8/8/3p4/4p3/2N5/8/7K w - - 0 1",
+                      (From => 18, To => 28, Piece => White_Knight,
+                       Promotion => White_Pawn, Flag => Quiet)) = -220,
+                 "SEE Nxe4 must be -220 (knight for pawn)");
+
+         -- c5xb6 : the only defender of the queen is a pinned pawn, so the
+         -- queen falls for free (+900).
+         Assert (See ("k7/p7/1q6/2P5/8/R7/8/7K w - - 0 1",
+                      (From => 34, To => 41, Piece => White_Pawn,
+                       Promotion => White_Pawn, Flag => Quiet)) = 900,
+                 "SEE c5xb6 must be +900 (pinned defender ignored)");
+
+         -- e5xd6 en passant : pawn for pawn with nothing left to recapture.
+         Assert (See ("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1",
+                      (From => 36, To => 43, Piece => White_Pawn,
+                       Promotion => White_Pawn, Flag => En_Passant)) = 100,
+                 "SEE ep capture must be +100");
+
+         Ada.Text_IO.Put_Line ("SEE tests OK");
       end;
 
       Ada.Text_IO.Put_Line ("all self tests OK");

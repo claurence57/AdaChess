@@ -18,6 +18,9 @@ use BBChess.Hash;
 with BBChess.Eval;
 use BBChess.Eval;
 
+with BBChess.See;
+use BBChess.See;
+
 package body BBChess.Search is
 
    -- Raised (from Poll_Time) when the per-move time budget is exhausted
@@ -271,7 +274,8 @@ package body BBChess.Search is
       -- Move the tactical moves (captures / promotions) to the front, then
       -- order them by MVV so the most promising captures are tried first.
       declare
-         T : Natural := 0;
+         T        : Natural := 0;
+         In_Check : constant Boolean := King_In_Check (Position, Position.Side);
       begin
          for I in 1 .. Count loop
             if Is_Tactical (Position, Moves (I)) then
@@ -314,21 +318,31 @@ package body BBChess.Search is
          end loop;
 
          for I in 1 .. T loop
-            declare
-               Undo  : Undo_Info;
-               Score : Score_Type;
-            begin
-               Make_Move (Position, Moves (I), Undo);
-               Score := -Quiescence (Position, -B, -A, Ply + 1);
-               Unmake_Move (Position, Moves (I), Undo);
+            -- A capture that the static exchange evaluation scores as losing
+            -- cannot improve on the stand-pat score, so it is not searched
+            -- (promotions and evasions out of check are always kept).
+            if (not In_Check)
+              and then Moves (I).Flag /= Promotion
+              and then Static_Exchange_Value (Position, Moves (I)) < 0
+            then
+               null;
+            else
+               declare
+                  Undo  : Undo_Info;
+                  Score : Score_Type;
+               begin
+                  Make_Move (Position, Moves (I), Undo);
+                  Score := -Quiescence (Position, -B, -A, Ply + 1);
+                  Unmake_Move (Position, Moves (I), Undo);
 
-               if Score >= B then
-                  return Score;
-               end if;
-               if Score > A then
-                  A := Score;
-               end if;
-            end;
+                  if Score >= B then
+                     return Score;
+                  end if;
+                  if Score > A then
+                     A := Score;
+                  end if;
+               end;
+            end if;
          end loop;
       end;
 
