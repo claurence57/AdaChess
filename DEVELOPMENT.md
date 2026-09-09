@@ -195,8 +195,14 @@ conservée : éval de départ = 0, miroir ⇒ `-Eval`) et par mini-matchs.
 - **Structure de pions** :
   * pions **doublés** (pénalité par pion excédentaire sur une colonne) ;
   * pions **isolés** (aucun pion ami sur les colonnes adjacentes) ;
-  * bonus renforcé pour les **pions passés liés** (+50 % du bonus de pion passé)
-    quand un pion ami est sur une colonne adjacente à une case d'écart.
+  * **pions passés** : bonus de base par rangée, + bonus s'ils sont
+    **protégés** (défendus par un pion ami, ~40-50 % du bonus) ou **éloignés**
+    (à ≥ 2 colonnes du roi ennemi, ~10-15 cp, utile pour le dévier en finale) ;
+- **Tours connectées** : deux tours qui se défendent (même colonne/traversée,
+  ligne libre) : ~10/14 cp.
+- **Tempo** (~10 cp au trait, ajouté par `Evaluate`) — comme il brise
+  l'antisymétrie exacte de `Evaluate`, le test de symétrie porte désormais sur
+  `Static` (le cœur sans tempo) : `Static(départ) = 0`, miroir ⇒ `-Static`.
 
 **Accélération / exploitation bitboard** — une partie 1 s+0,1 s profilée montrait
 l'éval à **~50-55 % du temps de recherche** (~1,1 M appels/partie), premier poste
@@ -214,13 +220,19 @@ de coût. Corrections :
 - Tables `Rank_Mask`, `Above_Rank`, `Below_Rank`, `Front_Files` pré-calculées en
   tête de fichier.
 
-Résultats mesurés contre MB (blitz 1 s+0,1 s, après rebuild) : BB **4-1-1** puis
-**2-0-4** selon les graines — aucune défaite, BB ≥ MB, niveau cohérent avec § 5.4.
+Résultats mesurés contre MB, après les ajouts du chantier 3 complet (colonnes
+ouvertes, structure de pions, pions protégés/éloignés, tours connectées, tempo) :
+- **blitz 1 s+0,1 s** : BB **5-1-0** (Elo ≈ +280, LOS ≈ 95 %),
+- **20+1** : BB **5-0-1** (Elo ≈ +417, LOS ≈ 99 %) — BB domine désormais MB à
+  temps long aussi. (Petits échantillons, à confirmer, mais la tendance est très
+  nette.)
 
 ## 6. État actuel & chantiers restants
 
 **Validations** : `./bin_bb/adachess_bb --selftest` passe (perft + roque + éval +
-recherche + **SEE**). Self-tests et perft ne doivent **jamais régresser**.
+recherche + **SEE**). Self-tests et perft ne doivent **jamais régresser**. Note :
+avec le **tempo**, `Evaluate` n'est plus exactement antisymétrique ; le test de
+symétrie porte sur `Static` (départ = 0, miroir ⇒ `-Static`).
 
 **Problèmes / chantiers restants (après les chantiers 2 & 3, cf. § 5.4 / § 5.5)**
 1. **Temps** : les forfaits sous cutechess sont corrigés (recherche interruptible) et
@@ -228,15 +240,15 @@ recherche + **SEE**). Self-tests et perft ne doivent **jamais régresser**.
    parties longues** et à **tuner l'allocation** si besoin (constantes en tête
    d'`adachess_bb.adb`).
 2. **Force** : l'historique, les fenêtres d'aspiration et l'extension en échec sont en
-   place (BB bat MB en blitz, tient à 20+1). Pistes restantes : movegen « légal
+   place (BB bat MB en blitz, domine à 20+1). Pistes restantes : movegen « légal
    direct » complet, **book d'ouvertures**, et l'usage du **SEE** pour trier plus
    finement la quiescence et les captures.
-3. **Évaluation** : colonnes ouvertes, structure de pions et accélérations (§ 5.5)
-   sont en place. Reste à **tuner les constantes** (tête de `bbchess-eval.adb`) et,
-   pour aller plus loin, ajouter **pions passés protégés/éloignés, tours connectées,
-   cases fortes (outposts), bonus de tempo**, ou passer à une évaluation
-   **incrémentale** (le profil montre que l'éval reste ~50 % du temps de recherche,
-   même optimisée).
+3. **Évaluation** : le chantier 3 est complet (§ 5.5) — colonnes ouvertes, structure
+   de pions (doublés/isolés/passés protégés et éloignés), tours connectées, tempo,
+   accélérations bitboard. Reste un **tuning fin des constantes** (tête de
+   `bbchess-eval.adb`) qui demanderait un tuner automatique (ex. texel / gradient
+   descent), des **outposts** (cases fortes) pour C/F, puis l'évaluation
+   **incrémentale** (#9, l'éval reste ~50 % du temps de recherche même optimisée).
 
 **Commandes utiles (Linux/ovh02)**
 ```bash

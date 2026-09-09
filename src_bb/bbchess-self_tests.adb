@@ -211,12 +211,17 @@ package body BBChess.Self_Tests is
 
       Ada.Text_IO.Put_Line ("perft tests OK");
 
-      -- Evaluation + search sanity.
-      Assert (Evaluate (Start_Position) = 0, "start eval must be 0");
+      -- Evaluation + search sanity. Static is the tempo-free, fully
+      -- symmetric core (0 on the initial position); Evaluate adds Tempo for
+      -- the side to move (White on the initial position).
+      Assert (Static (Start_Position) = 0, "start static eval must be 0");
+      Assert (Evaluate (Start_Position) = Tempo,
+              "start eval must equal Tempo (White to move)");
 
-      -- The evaluation must be symmetric: mirroring the board (rank flip +
-      -- color swap) must negate the static score. Exercise the positional
-      -- terms (mobility, bishop pair, rooks on the 7th, passed pawns).
+      -- The tempo-free evaluation must be symmetric: mirroring the board
+      -- (rank flip + color swap) must negate the static score. Exercise the
+      -- positional terms (mobility, bishop pair, rooks on the 7th, passed
+      -- pawns, open files).
       declare
          function Flip_Rank (S : in Square_Type) return Square_Type is
            (Square_Type ((7 - Rank_Of (S)) * 8 + File_Of (S)));
@@ -245,7 +250,7 @@ package body BBChess.Self_Tests is
                   end;
                end loop;
             end loop;
-            Assert (Evaluate (M) = -Evaluate (P),
+            Assert (Static (M) = -Static (P),
                     "eval not symmetric for FEN " & Fen);
          end Check_Symmetry;
       begin

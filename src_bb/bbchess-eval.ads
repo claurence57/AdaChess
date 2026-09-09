@@ -22,11 +22,18 @@ package BBChess.Eval is
    Infinity   : constant Score_Type := 30_000;
    Mate_Score : constant Score_Type := 30_000;
 
+   -- Tempo bonus granted to the side to move (added by Evaluate).
+   Tempo : constant Score_Type := 10;
+
    function Static (Position : in Position_Type) return Score_Type;
-   -- Material + position, positive when White is better.
+   -- Material + position, positive when White is better. Fully symmetric:
+   -- Static(M) = -Static(P) when M mirrors P (rank flip + color swap).
 
    function Evaluate (Position : in Position_Type) return Score_Type;
    -- Static evaluation from the point of view of the side to move
-   -- (convenient for a negamax framework).
+   -- (convenient for a negamax framework), plus the Tempo bonus for the
+   -- side to move. Note: because of the tempo, Evaluate is *not* exactly
+   -- antisymmetric under a rank flip + color swap that keeps the same side
+   -- to move; the pure antisymmetry holds on Static.
 
 end BBChess.Eval;

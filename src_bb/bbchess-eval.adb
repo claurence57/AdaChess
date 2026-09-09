@@ -15,18 +15,22 @@
 --    * rooks on the 7th rank (bonus grows when the enemy king is still on
 --      its back ranks), stronger in the endgame;
 --    * rooks on open / semi-open files;
+--    * connected rooks (defending each other on the same file/rank);
 --    * pawn structure: doubled and isolated pawns, passed pawns (no enemy
---      pawn in front on the same or adjacent files), with a larger bonus for
---      connected passed pawns; all derived from bitboard file masks;
+--      pawn in front on the same or adjacent files), with extra bonuses for
+--      protected and outside passed pawns; all derived from bitboard file
+--      masks;
 --    * king safety (pawn shelter, open files near the king, pawn storm,
 --      enemy attackers around the king) - opening/middlegame only;
 --    * king endgame activity (the base PST keeps the king at home in the
 --      middlegame; the endgame table drives it toward the center).
 --
 --  Every per-side term uses only color-generic helpers, so subtracting the
---  White and Black scores keeps the whole evaluation symmetric and equal to
---  0 on the initial position. Occupancy is computed once per Static call and
---  shared between both colors and the king-safety term.
+--  White and Black scores keeps the tempo-free evaluation (Static) symmetric
+--  and equal to 0 on the initial position. Evaluate adds the Tempo bonus for
+--  the side to move, so its antisymmetry holds on Static only. Occupancy is
+--  computed once per Static call and shared between both colors and the
+--  king-safety term.
 --
 
 with BBChess.Attacks;
@@ -343,6 +347,10 @@ package body BBChess.Eval is
    Rook_Semi_Open_Opening    : constant Score_Type := 10;
    Rook_Semi_Open_Endgame    : constant Score_Type := 6;
 
+   -- Two rooks defending each other (same file or rank, line clear).
+   Rook_Connected_Opening : constant Score_Type := 10;
+   Rook_Connected_Endgame : constant Score_Type := 14;
+
    -- Pawn structure penalties (per offending pawn).
    Doubled_Pawn_Opening : constant Score_Type := 8;
    Doubled_Pawn_Endgame : constant Score_Type := 5;
@@ -355,6 +363,16 @@ package body BBChess.Eval is
      (0, 5, 8, 12, 16, 22, 30, 0);
    Passed_Pawn_Endgame : constant array (Natural range 0 .. 7) of Score_Type :=
      (0, 12, 22, 38, 60, 90, 130, 0);
+
+   -- Extra bonus (fraction of the row bonus) for a passed pawn that is
+   -- defended by a friendly pawn ("protected" passed pawn).
+   Protected_Passed_Opening : constant Score_Type := 40;
+   Protected_Passed_Endgame : constant Score_Type := 50;
+   -- "Outside" passed pawn: far from the enemy king (useful to deflect it).
+   Outside_Passed_Opening    : constant Score_Type := 10;
+   Outside_Passed_Endgame    : constant Score_Type := 15;
+   -- Minimum file distance from the enemy king to count as "outside".
+   Outside_Passed_Distance   : constant := 2;
 
    -- King safety.
    Pawn_Shield_Row1      : constant Score_Type := 8;
@@ -563,6 +581,23 @@ package body BBChess.Eval is
          end;
       end loop;
 
+      -- Connected rooks: when a rook is defended by a friendly rook (same
+      -- file or rank with a clear line), both gain a small bonus.
+      declare
+         RR : Bitboard := Position.Pieces (Make (Color, Rook));
+         R1 : Square_Type;
+      begin
+         if Popcount (RR) = 2 then
+            R1 := Lowest_Bit (RR);
+            RR := RR and (RR - 1);
+            if (Rook_Attacks (R1, Occ) and RR) /= 0 then
+               Result := Result +
+                 (Opening => Rook_Connected_Opening,
+                  End_Game => Rook_Connected_Endgame);
+            end if;
+         end if;
+      end;
+
       -- Pawn structure, all bitboard-wise: doubled / isolated penalties
       -- derived from per-file counts, and a passed-pawn bonus (with an
       -- extra reward when a passed pawn is connected / supported).
@@ -570,8 +605,7 @@ package body BBChess.Eval is
          Counts  : array (0 .. 7) of Natural := (others => 0);
          Passed  : Bitboard := Passed_Pawns (Position, Color);
          B2      : Bitboard := Own_Pawns;
-      begin
-         -- Per-file counts of friendly pawns.
+      begin         -- Per-file counts of friendly pawns.
          while B2 /= 0 loop
             Counts (File_Of (Lowest_Bit (B2))) :=
               Counts (File_Of (Lowest_Bit (B2))) + 1;
@@ -613,55 +647,50 @@ package body BBChess.Eval is
             end if;
          end loop;
 
-         -- Passed pawns: iterate the bitboard, giving the row bonus and a
-         -- connected bonus when a friendly pawn stands on an adjacent file
-         -- at most one rank away (they defend each other).
-         while Passed /= 0 loop
-            declare
-               Sq  : constant Square_Type := Lowest_Bit (Passed);
-               F   : constant Natural := File_Of (Sq);
-               Row : constant Natural := Own_Row (Color, Sq);
-               Connected : Boolean := False;
-            begin
-               for DF in -1 .. 1 loop
-                  declare
-                     NF : constant Integer := Integer (F) + DF;
-                  begin
-                     if DF /= 0 and then NF in 0 .. 7
-                       and then Counts (NF) > 0
-                     then
-                        -- A friendly pawn on an adjacent file within one
-                        -- rank is a supporting neighbour.
-                        declare
-                           NB : Bitboard :=
-                             Position.Pieces (Make (Color, Pawn))
-                             and File_Mask (NF);
-                        begin
-                           while NB /= 0 loop
-                              if abs (Integer (Own_Row (Color, Lowest_Bit (NB)))
-                                      - Integer (Row)) <= 1 then
-                                 Connected := True;
-                                 exit;
-                              end if;
-                              NB := NB and (NB - 1);
-                           end loop;
-                        end;
-                     end if;
-                  end;
-                  exit when Connected;
-               end loop;
+         -- Passed pawns: iterate the bitboard, giving the row bonus and an
+         -- extra reward when the passed pawn is defended by a friendly pawn
+         -- ("protected") or far from the enemy king ("outside", good to
+         -- deflect it in king-pawn endgames).
+         declare
+            -- Squares defended by one of our pawns.
+            Defended : Bitboard := 0;
+         begin
+            B2 := Own_Pawns;
+            while B2 /= 0 loop
+               Defended := Defended or Pawn_Attacks (Color, Lowest_Bit (B2));
+               B2 := B2 and (B2 - 1);
+            end loop;
 
-               Result := Result +
-                 (Opening => Passed_Pawn_Opening (Row),
-                  End_Game => Passed_Pawn_Endgame (Row));
-               if Connected then
+            while Passed /= 0 loop
+               declare
+                  Sq       : constant Square_Type := Lowest_Bit (Passed);
+                  F        : constant Natural := File_Of (Sq);
+                  Row      : constant Natural := Own_Row (Color, Sq);
+                  Defended_Pawn : constant Boolean :=
+                    (Defended and Bit (Sq)) /= 0;
+                  Outside_Pawn  : constant Boolean :=
+                    abs (Integer (F) - Integer (File_Of (Enemy_King)))
+                    >= Outside_Passed_Distance;
+               begin
                   Result := Result +
-                    (Opening => Passed_Pawn_Opening (Row) / 2,
-                     End_Game => Passed_Pawn_Endgame (Row) / 2);
-               end if;
-            end;
-            Passed := Passed and (Passed - 1);
-         end loop;
+                    (Opening => Passed_Pawn_Opening (Row),
+                     End_Game => Passed_Pawn_Endgame (Row));
+                  if Defended_Pawn then
+                     Result := Result +
+                       (Opening => Passed_Pawn_Opening (Row)
+                          * Protected_Passed_Opening / 100,
+                        End_Game => Passed_Pawn_Endgame (Row)
+                          * Protected_Passed_Endgame / 100);
+                  end if;
+                  if Outside_Pawn then
+                     Result := Result +
+                       (Opening => Outside_Passed_Opening,
+                        End_Game => Outside_Passed_Endgame);
+                  end if;
+               end;
+               Passed := Passed and (Passed - 1);
+            end loop;
+         end;
       end;
 
       -- King: endgame activity replaces the home-oriented PST.
@@ -731,10 +760,12 @@ package body BBChess.Eval is
 
    function Evaluate (Position : in Position_Type) return Score_Type is
    begin
+      -- Static from the side to move's point of view, plus the tempo bonus
+      -- for having the move (helps to avoid zugzwang artifacts).
       if Position.Side = White then
-         return Static (Position);
+         return Static (Position) + Tempo;
       else
-         return -Static (Position);
+         return -Static (Position) + Tempo;
       end if;
    end Evaluate;
 
