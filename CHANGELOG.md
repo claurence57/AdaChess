@@ -21,6 +21,12 @@
 - Coups encodés en 32 bits, **TT à 2 voies avec aging**.
 - `--bench 9` ≈ **2,8 M knps** ; perft exact (KiwiPete d1-d3), A/B sans régression.
 
+### Protocole
+- **Support UCI** (en plus de XBoard) : `uci`, `isready`, `ucinewgame`,
+  `position`, `go` (temps/profondeur), `setoption`, `stop`, `bestmove`.
+- Buffer d'entrée porté à 8192 octets (les longues lignes `position ... moves`
+  étaient tronquées).
+
 ### Évaluation
 - Sécurité du roi renforcée (zone à distance 2, danger non linéaire, roi
   exposé) — cf. `DEVELOPMENT.md` § 7bis.

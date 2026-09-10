@@ -391,6 +391,27 @@ après un profil, sinon les mesures sont faussées d'un facteur ~3.
 verts (perft exact, dont KiwiPete d1-d3, tests `Between`/`Line`, round-trip du
 packing). A/B vs `bb-1.0` : **REF 1-11-8 NEW** (M2), aucune régression.
 
+## 7quinquies. Protocole UCI
+
+Le moteur parle désormais **UCI** en plus de XBoard (`adachess_bb.adb`). La
+détection se fait par la commande `uci` ; `UCI_Mode` garde les commandes UCI
+spécifiques (`isready`, `ucinewgame`, `position`, `go`, `stop`, `setoption`)
+séparées de XBoard (attention : `go` existe dans les deux protocoles).
+
+Commandes prises en charge : `uci`, `isready`, `ucinewgame`, `position
+startpos|fen ... moves ...`, `go wtime/btime/winc/binc/movetime/depth`,
+`setoption name Clear Hash`, `stop`/`ponderhit` (no-op), `quit`. Sortie
+`bestmove <coord>`. Les coups sont déjà en notation coordonnée
+(`e2e4`, `e7e8q`), donc `To_String`/`From_String` servent directement.
+
+Limite : la recherche est synchrone, donc `stop` n'interrompt pas un `go`
+en cours (pas encore de thread de recherche) ; `go infinite` n'est pas géré.
+
+**Correctif important** : le buffer d'entrée est passé de 256 à 8192 octets.
+Les longues lignes `position ... moves ...` (parties > ~50 coups) étaient
+**coupées** par `Get_Line`, ce qui désynchronisait la position et produisait des
+coups illégaux.
+
 ## 8. État actuel & chantiers restants
 
 **Validations** : `./bin_bb/adachess_bb --selftest` passe (perft + roque + éval +
@@ -438,6 +459,10 @@ gprbuild -P adachess_bb.gpr -XMode=release   # BB
 scripts/ab.sh 1+0.1 20 7                     # tc, parties, graine
 # Match vs GNU Chess (UCI, wrapper requis) :
 scripts/vs_gnuchess.sh 30+1 12 7             # tc, parties, graine
+# BB en UCI sous cutechess (le moteur parle aussi XBoard) :
+cutechess-cli -engine name=BB cmd="$PWD/bin_bb/adachess_bb" proto=uci \
+  -engine name=GNU cmd=/home/christophe/bin/gnuchess_uci.sh proto=uci \
+  -each tc=5+0.5 -games 2
 ```
 
 **Règle d'or pour la suite** : toute modification (éval, search, movegen) doit garder

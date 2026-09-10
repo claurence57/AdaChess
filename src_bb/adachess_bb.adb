@@ -53,7 +53,7 @@ with BBChess.Self_Tests;
 
 procedure AdaChess_BB is
 
-   Input_Line : String (1 .. 256);
+   Input_Line : String (1 .. 8192);
    Last       : Natural;
 
    ---------------
@@ -138,6 +138,7 @@ procedure AdaChess_BB is
    Engine_Side : Color_Type := Black;
    Force       : Boolean := True;
    Protocol    : Boolean := False;
+   UCI_Mode    : Boolean := False;
 
    -- Game history (Zobrist keys of every position played, oldest first) for
    -- the threefold-repetition detection in the search. Keys are recorded
@@ -190,7 +191,7 @@ procedure AdaChess_BB is
 
    Current_Command : String (1 .. 64);
    Cmd_Last        : Natural;
-   Parameter       : String (1 .. 256);
+   Parameter       : String (1 .. 8192);
    Par_Last        : Natural;
 
    -- Time to spend on the next move. When a clock is known, allocate a
@@ -248,9 +249,156 @@ procedure AdaChess_BB is
       end if;
    end Play_If_My_Turn;
 
-   --------------------
-   -- Benchmark mode --
-   --------------------
+   ----------------
+   -- UCI support --
+   ----------------
+
+   function Token_Count (S : in String) return Natural is
+      I : Natural := S'First;
+      N : Natural := 0;
+   begin
+      while I <= S'Last loop
+         while I <= S'Last and then S (I) = ' ' loop
+            I := I + 1;
+         end loop;
+         exit when I > S'Last;
+         N := N + 1;
+         while I <= S'Last and then S (I) /= ' ' loop
+            I := I + 1;
+         end loop;
+      end loop;
+      return N;
+   end Token_Count;
+
+   function Parse_Duration (S : String; Default : Duration) return Duration is
+   begin
+      if S'Length = 0 then
+         return Default;
+      end if;
+      return Duration'Value (S);
+   exception
+      when Constraint_Error => return Default;
+   end Parse_Duration;
+
+   function Parse_Natural (S : String; Default : Natural) return Natural is
+   begin
+      if S'Length = 0 then
+         return Default;
+      end if;
+      return Natural'Value (S);
+   exception
+      when Constraint_Error => return Default;
+   end Parse_Natural;
+
+   -- "position startpos moves ..." or "position fen <6 fields> moves ...".
+   procedure Apply_UCI_Position (Par : in String) is
+      T1 : constant String := Token (Par, 1);
+      I  : Natural := 1;
+      N  : constant Natural := Token_Count (Par);
+      M  : Move_Type;
+      U  : Undo_Info;
+   begin
+      if T1 = "startpos" then
+         Pos := Start_Position;
+         I := 2;
+      elsif T1 = "fen" then
+         declare
+            Fen : String (1 .. 256);
+            L   : Natural := 0;
+         begin
+            for K in 2 .. 7 loop
+               declare
+                  Tok : constant String := Token (Par, K);
+               begin
+                  exit when Tok'Length = 0;
+                  if L > 0 then
+                     L := L + 1;
+                     Fen (L) := ' ';
+                  end if;
+                  for C of Tok loop
+                     L := L + 1;
+                     Fen (L) := C;
+                  end loop;
+               end;
+            end loop;
+            begin
+               Load (Pos, Fen (1 .. L));
+            exception
+               when Constraint_Error =>
+                  Ada.Text_IO.Put_Line ("info string bad FEN");
+            end;
+         end;
+         I := 8;
+      else
+         return;
+      end if;
+
+      Reset_Game_History;
+      while I <= N loop
+         exit when Token (Par, I) = "moves";
+         I := I + 1;
+      end loop;
+      I := I + 1;
+      while I <= N loop
+         M := From_String (Pos, Token (Par, I));
+         if M = Empty_Move then
+            Ada.Text_IO.Put_Line
+              ("info string unknown move " & Token (Par, I));
+         else
+            Make_Move (Pos, M, U);
+            Record_Current_Key;
+         end if;
+         I := I + 1;
+      end loop;
+   end Apply_UCI_Position;
+
+   -- "go wtime .. btime .. winc .. binc .. movestogo .. depth .. movetime ..".
+   procedure Handle_UCI_Go (Par : in String) is
+      N : constant Natural := Token_Count (Par);
+      I : Natural := 1;
+   begin
+      Fixed_Time := False;
+      Clock_Left := 0.0;
+      Time_Increment := 0.0;
+      Max_Depth := 64;
+
+      while I <= N loop
+         declare
+            Name : constant String := Token (Par, I);
+            Next : constant String :=
+              (if I < N then Token (Par, I + 1) else "");
+         begin
+            if Name = "wtime" and then Pos.Side = White then
+               Clock_Left := Parse_Duration (Next, 0.0) / 1000.0;
+            elsif Name = "btime" and then Pos.Side = Black then
+               Clock_Left := Parse_Duration (Next, 0.0) / 1000.0;
+            elsif Name = "winc" and then Pos.Side = White then
+               Time_Increment := Parse_Duration (Next, 0.0) / 1000.0;
+            elsif Name = "binc" and then Pos.Side = Black then
+               Time_Increment := Parse_Duration (Next, 0.0) / 1000.0;
+            elsif Name = "movetime" then
+               Fixed_Time := True;
+               Move_Time := Parse_Duration (Next, 1.0) / 1000.0;
+            elsif Name = "depth" then
+               Max_Depth := Parse_Natural (Next, 64);
+            end if;
+         end;
+         I := I + 1;
+      end loop;
+
+      declare
+         M : constant Move_Type :=
+           Best_Move (Pos, Max_Depth, Time_For_Next_Move);
+      begin
+         if M = Empty_Move then
+            Ada.Text_IO.Put_Line ("bestmove 0000");
+         else
+            Ada.Text_IO.Put_Line ("bestmove " & To_String (M));
+         end if;
+         Ada.Text_IO.Flush;
+      end;
+   end Handle_UCI_Go;
+
 
    -- Fixed set of positions exercising the evaluation and the search. The
    -- benchmark searches every one at a fixed depth and reports the total
@@ -357,6 +505,45 @@ begin
       begin
          if Cmd = "xboard" then
             Protocol := True;
+
+          elsif Cmd = "uci" then
+             UCI_Mode := True;
+             Ada.Text_IO.Put_Line ("id name AdaChess-BB 1.0");
+             Ada.Text_IO.Put_Line ("id author AdaChess");
+             Ada.Text_IO.Put_Line
+               ("option name Hash type spin default 64 min 1 max 1024");
+             Ada.Text_IO.Put_Line
+               ("option name Threads type spin default 1 min 1 max 1");
+             Ada.Text_IO.Put_Line ("uciok");
+             Ada.Text_IO.Flush;
+
+          elsif Cmd = "isready" and then UCI_Mode then
+             Ada.Text_IO.Put_Line ("readyok");
+             Ada.Text_IO.Flush;
+
+          elsif Cmd = "ucinewgame" and then UCI_Mode then
+             Reset_Search;
+             Reset_Game_History;
+
+          elsif Cmd = "position" and then UCI_Mode then
+             Apply_UCI_Position (Par);
+
+          elsif Cmd = "go" and then UCI_Mode then
+             Handle_UCI_Go (Par);
+
+          elsif UCI_Mode
+            and then (Cmd = "stop" or else Cmd = "ponderhit"
+                      or else Cmd = "debug" or else Cmd = "register")
+          then
+             null;
+
+          elsif Cmd = "setoption" and then UCI_Mode then
+             if Token (Par, 1) = "name"
+               and then Token (Par, 2) = "Clear"
+               and then Token (Par, 3) = "Hash"
+             then
+                Reset_Search;
+             end if;
 
           elsif Cmd = "protover" then
              Ada.Text_IO.Put_Line ("feature myname=""AdaChess-BB 1.0""");
