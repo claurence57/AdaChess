@@ -27,6 +27,9 @@ package BBChess.Board is
    function File_Of (Square : in Square_Type) return Natural is (Square mod 8);
    function Rank_Of (Square : in Square_Type) return Natural is (Square / 8);
 
+   pragma Inline (File_Of);
+   pragma Inline (Rank_Of);
+
    -- Precomputed mask with exactly one bit set for each square.
    type Bit_Table_Type is array (Square_Type) of Bitboard;
    Bit : Bit_Table_Type;

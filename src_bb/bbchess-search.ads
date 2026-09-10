@@ -59,4 +59,11 @@ package BBChess.Search is
    -- history) between games. The position-independent data must not leak
    -- from one game to the next.
 
+   function Nodes_Searched return Natural;
+   -- Number of nodes visited since the last Reset_Nodes (or the last timed
+   -- search started). Used by the benchmark harness to report nodes/second.
+
+   procedure Reset_Nodes;
+   -- Reset the node counter (benchmarking).
+
 end BBChess.Search;

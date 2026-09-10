@@ -35,4 +35,9 @@ package BBChess.Pieces is
    function From_Color (Color : in Color_Type) return Piece_Type is
      (Make (Color, King));
 
+   pragma Inline (Opposite);
+   pragma Inline (Color);
+   pragma Inline (Kind);
+   pragma Inline (Make);
+
 end BBChess.Pieces;

@@ -57,6 +57,17 @@ package body BBChess.Search is
       Time_Limit_Armed := False;
    end Disarm_Time_Limit;
 
+   function Nodes_Searched return Natural is
+   begin
+      return Nodes_Count;
+   end Nodes_Searched;
+
+   procedure Reset_Nodes is
+   begin
+      Nodes_Count := 0;
+      Next_Checkpoint := Check_Interval;
+   end Reset_Nodes;
+
    -- Called at every search node. Checking the clock only every
    -- Check_Interval nodes keeps the overhead negligible while still
    -- bounding the overshoot to about one interval worth of nodes.

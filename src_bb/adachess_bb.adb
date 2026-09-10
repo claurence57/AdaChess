@@ -20,8 +20,11 @@ with Ada.Text_IO;
 with Ada.Command_Line;
 with Ada.Characters.Handling;
 with Ada.IO_Exceptions;
+with Ada.Real_Time;
+with Ada.Strings.Unbounded;
 
 use Ada.Characters.Handling;
+use Ada.Real_Time;
 
 with BBChess.Pieces;
 use BBChess.Pieces;
@@ -244,12 +247,85 @@ procedure AdaChess_BB is
          end;
       end if;
    end Play_If_My_Turn;
+
+   --------------------
+   -- Benchmark mode --
+   --------------------
+
+   -- Fixed set of positions exercising the evaluation and the search. The
+   -- benchmark searches every one at a fixed depth and reports the total
+   -- node count and nodes/second, so that each optimization can be measured
+   -- against the same workload.
+   procedure Run_Bench (Depth : in Natural) is
+      use Ada.Strings.Unbounded;
+      Fens : constant array (Positive range <>) of Unbounded_String :=
+        (1 => To_Unbounded_String ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
+         2 => To_Unbounded_String ("r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4"),
+         3 => To_Unbounded_String ("rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2"),
+         4 => To_Unbounded_String ("r1bq1rk1/pp3ppp/2n1pn2/2pp4/3P1B2/2NBPN2/PPPQ1PPP/2KR3R w - - 0 1"),
+         5 => To_Unbounded_String ("r4rk1/pppbqppp/2nbp3/3P4/4B3/5N2/PPP2PPP/R1BQR1K1 b - - 0 11"),
+         6 => To_Unbounded_String ("r4r2/pppbnppk/3b4/3p4/8/5N2/PPP2PPP/R1BQ2K1 w - - 0 14"),
+         7 => To_Unbounded_String ("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1"),
+         8 => To_Unbounded_String ("4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"));
+      Total_Nodes : Natural := 0;
+      Pos         : Position_Type;
+      T0          : constant Time := Clock;
+      Elapsed     : Duration;
+      Nps         : Long_Float;
+   begin
+      Reset_Search;
+      Reset_Nodes;
+      for I in Fens'Range loop
+         Load (Pos, To_String (Fens (I)));
+         declare
+            M : constant Move_Type := Best_Move (Pos, Depth);
+         begin
+            null;
+            pragma Unreferenced (M);
+         end;
+      end loop;
+      Elapsed := To_Duration (Clock - T0);
+      Total_Nodes := Nodes_Searched;
+
+      if Elapsed > 0.0 then
+         Nps := Long_Float (Total_Nodes) / Long_Float (Elapsed);
+      else
+         Nps := 0.0;
+      end if;
+
+      Ada.Text_IO.Put_Line
+        ("bench depth" & Natural'Image (Depth)
+         & ": " & Natural'Image (Fens'Length) & " positions, "
+         & Natural'Image (Total_Nodes) & " nodes, "
+         & Duration'Image (Elapsed) & " s, "
+         & Long_Float'Image (Nps / 1000.0) & " knps");
+   end Run_Bench;
+
 begin
    -- Self test mode.
    if Ada.Command_Line.Argument_Count > 0
      and then Ada.Command_Line.Argument (1) = "--selftest"
    then
       BBChess.Self_Tests.Run;
+      return;
+   end if;
+
+   -- Benchmark mode (optional depth as second argument, default 8).
+   if Ada.Command_Line.Argument_Count > 0
+     and then Ada.Command_Line.Argument (1) = "--bench"
+   then
+      declare
+         D : Natural := 8;
+      begin
+         if Ada.Command_Line.Argument_Count >= 2 then
+            begin
+               D := Natural'Value (Ada.Command_Line.Argument (2));
+            exception
+               when Constraint_Error => D := 8;
+            end;
+         end if;
+         Run_Bench (D);
+      end;
       return;
    end if;
 

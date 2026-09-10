@@ -14,7 +14,7 @@ project AdaChess_BB is
    for Object_Dir use "obj_bb";
    for Exec_Dir use "bin_bb";
    for Source_Dirs use ("src_bb/**");
-   for Languages use ("Ada");
+   for Languages use ("Ada", "C");
 
    type Mode_Type is
       ("release", "debug");
@@ -28,9 +28,13 @@ project AdaChess_BB is
    package Compiler is
       case Mode is
          when "release" =>
-            for Switches ("ada") use ("-gnat2012", "-gnatp", "-gnatn", "-O3", "-gnatf");
+            for Switches ("ada") use
+              ("-gnat2012", "-gnatp", "-gnatn", "-O3", "-gnatf",
+               "-mpopcnt", "-mbmi");
+            for Switches ("c") use ("-O3", "-mpopcnt", "-mbmi");
          when "debug" =>
             for Switches ("ada") use ("-gnat2012", "-gnata", "-g");
+            for Switches ("c") use ("-O0", "-g");
       end case;
    end Compiler;
 

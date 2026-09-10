@@ -4,6 +4,14 @@
 
 package body BBChess.Board is
 
+   -- Bit intrinsics provided by bbchess-bits.c (GCC __builtin_popcountll /
+   -- __builtin_ctzll, built with -mpopcnt -mbmi). These replace the previous
+   -- software loops, which dominated the profile.
+   function C_Popcount (X : in Bitboard) return Natural
+     with Import, Convention => C, External_Name => "bb_popcountll";
+   function C_Ctz (X : in Bitboard) return Natural
+     with Import, Convention => C, External_Name => "bb_ctzll";
+
    ---------------
    -- Color_Board --
    ---------------
@@ -92,12 +100,7 @@ package body BBChess.Board is
 
    function Lowest_Bit (Board : in Bitboard) return Square_Type is
    begin
-      for Square in Square_Type loop
-         if (Board and Bit (Square)) /= 0 then
-            return Square;
-         end if;
-      end loop;
-      raise Program_Error with "Lowest_Bit called on an empty board";
+      return Square_Type (C_Ctz (Board));
    end Lowest_Bit;
 
    -------------
@@ -105,14 +108,8 @@ package body BBChess.Board is
    -------------
 
    function Popcount (Board : in Bitboard) return Natural is
-      Value : Bitboard := Board;
-      Count : Natural := 0;
    begin
-      while Value /= 0 loop
-         Value := Value and (Value - 1);
-         Count := Count + 1;
-      end loop;
-      return Count;
+      return C_Popcount (Board);
    end Popcount;
 
    ----------------------
