@@ -1,5 +1,23 @@
 # Changelog — AdaChess-BB
 
+## Non publié (développement post bb-1.0)
+
+### Performance
+- Harnais `--bench [profondeur]` (8 positions, nœuds/s).
+- Intrinsèques bits (`popcnt`/`bsf`) via shim C + `-mpopcnt -mbmi`, inlining
+  (`-gnatN`), `pragma Inline` sur les helpers chauds.
+- **Zobrist incrémental** dans `Make_Move`, occupancy/couleur incrémentales,
+  détection de capture O(1).
+- Quiescence en **génération tactique** seule, `Is_Repetition` borné à la
+  fenêtre réversible, statut d'échec mis en cache.
+- Éval : table plate matériel+PST, zones d'attaque du roi précalculées,
+  `Pin_Mask` par rayons/between.
+- Résultat : ~470 → ~2400 knps à profondeur 9 (×5,2), self-tests verts.
+
+### Évaluation
+- Sécurité du roi renforcée (zone à distance 2, danger non linéaire, roi
+  exposé) — cf. `DEVELOPMENT.md` § 7bis.
+
 ## bb-1.0 (2026-09-10)
 
 Première version « figée » d'AdaChess-BB (moteur bitboard en Ada), utilisée

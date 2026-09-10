@@ -19,3 +19,6 @@ opt/*
 obj_bb/
 bin_bb/
 *.pgn
+
+gmon.out
+perf.data*

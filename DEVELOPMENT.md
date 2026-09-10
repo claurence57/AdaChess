@@ -330,6 +330,37 @@ l'attaque reste en partie invisible statiquement (BB continue de jouer `exd5` à
 basse profondeur). L'amélioration est cependant générale et mesure un gain réel
 en blitz.
 
+## 7ter. Optimisation des performances (éval + recherche)
+
+Objectif : maximiser les nœuds/seconde pour gagner de la profondeur effective.
+Mesure via un harnais dédié `--bench [profondeur]` : 8 positions fixes
+(début, ouvertures, milieu, finale) cherchées à profondeur fixe, sortie
+`nœuds / temps / knps`. À profondeur 9, on est passé de **~470 knps** à
+**~2400 knps** (≈ **×5,2**), à compteurs de nœuds **identiques** (aucun
+changement de comportement de recherche).
+
+Gains, par ordre d'implémentation :
+1. **Intrinsèques bits** : shim C `bbchess-bits.c` (`__builtin_popcountll`,
+   `__builtin_ctzll`) importée en Ada ; `Lowest_Bit`/`Popcount` ne sont plus des
+   boucles logicielles. Compilation `-mpopcnt -mbmi`. `pragma Inline` sur les
+   helpers chauds + `-gnatN`. → ×3,8 à lui seul.
+2. **Zobrist incrémental** : `Make_Move` met `Position.Key` à jour par XOR
+   (pièce/capture/roque/droits/ep/côté) au lieu de `Hash.Compute` (parcours
+   complet). Test croisé en self-test : clé incrémentale = `Compute`.
+3. **Recherche** : quiescence en **génération tactique seule** (hors échec) ;
+   `Is_Repetition` limité à la fenêtre réversible `Halfmove` (au lieu de 512) ;
+   statut d'échec renvoyé par la movegen (évite un second test).
+4. **Éval** : table plate `Material_PST(Piece, Square)` et zones Near/Far du roi
+   précalculées.
+5. **Occupancy/color boards incrémentales** (`All_Occ`, `Color_Occ` mis à jour
+   dans `Put/Remove_Piece`) et détection de capture O(1) dans `Make_Move`.
+6. **`Pin_Mask`** par rayons/between (bitboards) au lieu d'un balayage case par
+   case. → ~+12 %.
+
+Pièges : un build `-pg`/gprof laisse des objets instrumentés ; gprbuild ne les
+recompile pas toujours au retour à la normale → **toujours `rm -rf obj_bb`**
+après un profil, sinon les mesures sont faussées d'un facteur ~3.
+
 ## 8. État actuel & chantiers restants
 
 **Validations** : `./bin_bb/adachess_bb --selftest` passe (perft + roque + éval +
@@ -364,13 +395,15 @@ dir=/tmp -engine name=BB cmd="$PWD/bin_bb/adachess_bb" proto=xboard dir="$PWD" .
    connectées, tempo. Reste un **tuning fin des constantes** (tête de
    `bbchess-eval.adb`) qui demanderait un tuner automatique (ex. texel / gradient
    descent), des **outposts** (cases fortes) pour C/F, puis l'évaluation
-   **incrémentale** (#9, l'éval reste ~50 % du temps de recherche même optimisée).
+   **incrémentale** (#9). L'éval reste le premier poste de temps (~14 % de
+   `positional_score` au profil), la mobilité en tête.
 
 **Commandes utiles (Linux/ovh02)**
 ```bash
 gprbuild -P adachess.gpr   -XMode=release    # MB
 gprbuild -P adachess_bb.gpr -XMode=release   # BB
 ./bin_bb/adachess_bb --selftest              # tests BB
+./bin_bb/adachess_bb --bench 9               # perf : 8 positions, profondeur 9 (knps)
 # A/B référence (~/bin/adachess_bb, tag bb-1.0) vs HEAD :
 scripts/ab.sh 1+0.1 20 7                     # tc, parties, graine
 # Match vs GNU Chess (UCI, wrapper requis) :
