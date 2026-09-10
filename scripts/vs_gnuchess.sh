@@ -7,7 +7,7 @@ TC="${1:-20+1}"
 GAMES="${2:-4}"
 SEED="${3:-7}"
 ENGINE="${4:-${HOME}/bin/adachess_bb}"   # default: reference
-GNU_WRAP="${GNU_WRAP:-/tmp/opencode/gnuchess_uci.sh}"
+GNU_WRAP="${GNU_WRAP:-${HOME}/bin/gnuchess_uci.sh}"
 OUT="/tmp/opencode/vs_gnu_$$.pgn"
 
 [ -x "$ENGINE" ] || { echo "engine not executable: $ENGINE"; exit 1; }
