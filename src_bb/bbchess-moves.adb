@@ -170,8 +170,52 @@ package body BBChess.Moves is
 
       Position.Side := Opp;
 
+      -- Incremental Zobrist update: XOR out the old state and XOR in the new
+      -- one. This reproduces Hash.Compute exactly (checked by a self test)
+      -- without rescanning the whole board on every node.
       if Hash.Keys_Enabled then
-         Position.Key := Hash.Compute (Position);
+         declare
+            K : Bitboard := Position.Key;
+         begin
+            -- The moving (or promoted) piece and the captured one.
+            K := K xor Hash.Piece_Key (Move.Piece, Move.From);
+            K := K xor Hash.Piece_Key (To_Board, Move.To);
+            if Undo.Has_Captured then
+               K := K xor Hash.Piece_Key (Undo.Captured, Undo.Captured_Square);
+            end if;
+
+            -- Castling also relocates the rook.
+            if Move.Flag in King_Side_Castle | Queen_Side_Castle then
+               K := K xor Hash.Piece_Key (Make (Moving, Rook),
+                                          Rook_From (Moving, Move.Flag));
+               K := K xor Hash.Piece_Key (Make (Moving, Rook),
+                                          Rook_To (Moving, Move.Flag));
+            end if;
+
+            -- Castling rights that were just lost.
+            for C in Color_Type loop
+               for CS in Castle_Side_Type loop
+                  if Undo.Castle (C, CS)
+                    and then not Position.Castle (C, CS)
+                  then
+                     K := K xor Hash.Castle_Key (C, CS);
+                  end if;
+               end loop;
+            end loop;
+
+            -- En-passant file: remove the old one, add the new one.
+            if Undo.En_Passant /= Ep_None then
+               K := K xor Hash.Ep_Key (Undo.En_Passant mod 8);
+            end if;
+            if Position.En_Passant /= Ep_None then
+               K := K xor Hash.Ep_Key (Position.En_Passant mod 8);
+            end if;
+
+            -- The side to move always flips.
+            K := K xor Hash.Side_Key;
+
+            Position.Key := K;
+         end;
       end if;
    end Make_Move;
 

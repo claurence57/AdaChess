@@ -37,6 +37,9 @@ use BBChess.See;
 with BBChess.Search;
 use BBChess.Search;
 
+with BBChess.Hash;
+use BBChess.Hash;
+
 package body BBChess.Self_Tests is
 
    procedure Assert (Condition : in Boolean; Message : in String) is
@@ -210,6 +213,33 @@ package body BBChess.Self_Tests is
       end;
 
       Ada.Text_IO.Put_Line ("perft tests OK");
+
+      -- Incremental Zobrist: after every real move (with keys enabled), the
+      -- incrementally maintained Position.Key must equal the full recompute.
+      -- This exercises castling, captures, en passant and promotions.
+      declare
+         P     : Position_Type;
+         U     : Undo_Info;
+         Moves : Move_List;
+         Count : Natural;
+         Bad   : Boolean := False;
+      begin
+         Load (P, "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+         Set_Keys_Enabled (True);
+         for Step in 1 .. 40 loop
+            if Hash.Compute (P) /= P.Key then
+               Bad := True;
+               exit;
+            end if;
+            Generate_Legal_Moves (P, Moves, Count);
+            exit when Count = 0;
+            Make_Move (P, Moves (1 + (Step * 7) mod Count), U);
+         end loop;
+         Set_Keys_Enabled (False);
+         Assert (not Bad, "incremental Zobrist diverged from Compute");
+      end;
+
+      Ada.Text_IO.Put_Line ("incremental Zobrist OK");
 
       -- Illegal FENs must be rejected at load time, in particular a position
       -- that leaves the side not to move in check (a capturable king would

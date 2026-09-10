@@ -307,17 +307,29 @@ package body BBChess.Search is
    function Is_Repetition (Position : in Position_Type;
                            Ply       : in Natural) return Boolean
    is
-      N : Natural := 0;
+      -- A position can only repeat since the last irreversible move (pawn
+      -- move or capture), so only the last Halfmove plies have to be scanned.
+      -- This turns the previous O(game length) scan into O(halfmove).
+      Window : constant Natural := Position.Halfmove;
+      N      : Natural := 0;
+      Start  : Natural;
+      Lo     : Natural;
    begin
-      for I in 0 .. Game_Key_Count - 1 loop
-         if Game_Keys (I) = Position.Key then
-            N := N + 1;
-            exit when N >= 2;
-         end if;
-      end loop;
+      if Window > 0 and then Game_Key_Count > 0 then
+         Start := (if Game_Key_Count > Window
+                   then Game_Key_Count - Window
+                   else 0);
+         for I in Start .. Game_Key_Count - 1 loop
+            if Game_Keys (I) = Position.Key then
+               N := N + 1;
+               exit when N >= 2;
+            end if;
+         end loop;
+      end if;
 
       if N < 2 and then Ply > 1 then
-         for P in 1 .. Ply - 1 loop
+         Lo := (if Ply > Window then Ply - Window else 1);
+         for P in Lo .. Ply - 1 loop
             if Search_Path (P) = Position.Key then
                N := N + 1;
                exit when N >= 2;
@@ -430,16 +442,18 @@ package body BBChess.Search is
       end if;
 
       Hash.Set_Keys_Enabled (False);
-      Generate_Legal_Moves (Position, Moves, Count);
+      if In_Check then
+         -- Every evasion must be tried.
+         Generate_Legal_Moves (Position, Moves, Count);
+      else
+         -- Only captures / promotions are searched in a quiet position, so
+         -- there is no need to generate the (numerous) quiet moves.
+         Generate_Legal_Tactical_Moves (Position, Moves, Count);
+      end if;
       Hash.Set_Keys_Enabled (True);
 
-      if Count = 0 then
-         if In_Check then
-            return -(Mate_Score - Ply);
-         else
-            -- Stalemate: a draw for the side to move.
-            return 0;
-         end if;
+      if Count = 0 and then In_Check then
+         return -(Mate_Score - Ply);
       end if;
 
       -- Move the tactical moves (captures / promotions) to the front, then
@@ -596,21 +610,19 @@ package body BBChess.Search is
       end;
 
       -- Move generation does not need the Zobrist key: keep it disabled so
-      -- that the per-candidate make/unmake legality tests stay cheap.
+      -- that the per-candidate make/unmake legality tests stay cheap. The
+      -- generator also reports the in-check status (it computes it anyway),
+      -- so the search does not test it a second time.
       Hash.Set_Keys_Enabled (False);
-      Generate_Legal_Moves (Position, Moves, Count);
+      Generate_Legal_Moves (Position, Moves, Count, In_Check);
       Hash.Set_Keys_Enabled (True);
 
        if Count = 0 then
-          if King_In_Check (Position, Position.Side) then
+          if In_Check then
              return -(Mate_Score - Ply);
           else
              return 0;
           end if;
-       end if;
-
-       if Depth >= 1 then
-          In_Check := King_In_Check (Position, Position.Side);
        end if;
 
        -- Check extension: evasions are forced, so an in-check node is
@@ -643,10 +655,15 @@ package body BBChess.Search is
             Saved   : Position_Type := Position;
             N_Score : Score_Type;
          begin
-            -- Give the move to the opponent for a reduced search.
+            -- Give the move to the opponent for a reduced search. The key
+            -- is updated incrementally (side flip + dropped en-passant).
             Position.Side := Opposite (Position.Side);
+            if Position.En_Passant /= Ep_None then
+               Position.Key :=
+                 Position.Key xor Hash.Ep_Key (Position.En_Passant mod 8);
+            end if;
             Position.En_Passant := Ep_None;
-            Position.Key := Hash.Compute (Position);
+            Position.Key := Position.Key xor Hash.Side_Key;
 
             N_Score := -Negamax (Position, Depth - 1 - Null_Reduction,
                                  Ply + 1, -B, -B + 1);

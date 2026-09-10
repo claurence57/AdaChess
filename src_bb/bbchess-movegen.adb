@@ -404,17 +404,18 @@ begin
      (Position : in Position_Type;
       Moves    : out Move_List;
       Count    : out Natural;
-      Tactical : in Boolean)
+      Tactical : in Boolean;
+      In_Check : out Boolean)
    is
       Pseudo  : Move_List;
       P_Count : Natural;
       Undo    : Undo_Info;
       Work    : Position_Type := Position;
-      In_Check : constant Boolean := King_In_Check (Position, Position.Side);
       Pinned   : Bitboard;
       Need_Test : Boolean;
    begin
       Count := 0;
+      In_Check := King_In_Check (Position, Position.Side);
       Generate_Pseudo_Moves (Position, Pseudo, P_Count, Tactical);
 
       -- When the side to move is not in check, a pseudo-legal move can only
@@ -455,16 +456,30 @@ begin
      (Position : in Position_Type;
       Moves    : out Move_List;
       Count    : out Natural) is
+      In_Check : Boolean;
    begin
-      Generate_Legal_Common (Position, Moves, Count, Tactical => False);
+      Generate_Legal_Common (Position, Moves, Count,
+                             Tactical => False, In_Check => In_Check);
+   end Generate_Legal_Moves;
+
+   procedure Generate_Legal_Moves
+     (Position : in Position_Type;
+      Moves    : out Move_List;
+      Count    : out Natural;
+      In_Check : out Boolean) is
+   begin
+      Generate_Legal_Common (Position, Moves, Count,
+                             Tactical => False, In_Check => In_Check);
    end Generate_Legal_Moves;
 
    procedure Generate_Legal_Tactical_Moves
      (Position : in Position_Type;
       Moves    : out Move_List;
       Count    : out Natural) is
+      In_Check : Boolean;
    begin
-      Generate_Legal_Common (Position, Moves, Count, Tactical => True);
+      Generate_Legal_Common (Position, Moves, Count,
+                             Tactical => True, In_Check => In_Check);
    end Generate_Legal_Tactical_Moves;
 
 end BBChess.Movegen;

@@ -19,10 +19,24 @@ package BBChess.Hash is
    function Compute (Position : in Position_Type) return Bitboard;
    -- Deterministic key of the whole position state.
 
+   -- Zobrist deltas used by Make_Move for incremental key updates. XORing
+   -- these in/out reproduces exactly the value of Compute.
+   function Piece_Key (Piece : in Piece_Type; Square : in Square_Type)
+     return Bitboard;
+   function Side_Key return Bitboard;
+   function Castle_Key (Color : in Color_Type; Side : in Castle_Side_Type)
+     return Bitboard;
+   function Ep_Key (File : in Natural) return Bitboard;
+
+   pragma Inline (Piece_Key);
+   pragma Inline (Side_Key);
+   pragma Inline (Castle_Key);
+   pragma Inline (Ep_Key);
+
    procedure Set_Keys_Enabled (On : in Boolean);
    function  Keys_Enabled return Boolean;
-   -- When enabled, Make_Move refreshes Position.Key (used by the search /
-   -- transposition table). Disabled by default so move generation and perft
-   -- do not pay for hashing.
+   -- When enabled, Make_Move updates Position.Key incrementally (used by the
+   -- search / transposition table). Disabled by default so move generation
+   -- and perft do not pay for hashing.
 
 end BBChess.Hash;

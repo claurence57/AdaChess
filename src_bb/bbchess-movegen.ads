@@ -32,6 +32,14 @@ package BBChess.Movegen is
       Count    : out Natural);
    -- Fill Moves (1..Count) with every legal move of the side to move.
 
+   procedure Generate_Legal_Moves
+     (Position : in Position_Type;
+      Moves    : out Move_List;
+      Count    : out Natural;
+      In_Check : out Boolean);
+   -- Same, also reporting whether the side to move is in check (computed
+   -- anyway by the generator, so this avoids a second check test).
+
    procedure Generate_Legal_Tactical_Moves
      (Position : in Position_Type;
       Moves    : out Move_List;
