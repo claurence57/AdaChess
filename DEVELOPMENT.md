@@ -266,6 +266,12 @@ Résultats A/B (1 s+0,1 s, 20 parties, graine 7) : **NEW bat REF 8-0-12**
 (≈ +147 Elo, LOS ≈ 99,8 %) — pas de régression, gain net. Self-test vert
 (perft inchangé + test répétition).
 
+Confirmation à **30 s+1 s, 12 parties** (graine 7) : **REF 1-4-7 NEW**
+(NEW ≈ +89 Elo, 0 défaite) — le gain tient à temps long. Contrôle de niveau :
+la référence `bb-1.0` contre **GNU Chess** à 30 s+1 s donne **BB 0-9-3**
+(3 nulles, GNU ~2500 Elo reste hors de portée), ce qui situe la marge de
+progression restante.
+
 **Bug préexistant repéré (non corrigé)** : sur un **FEN illégal** où le camp au
 trait est « en échec » vis-à-vis du roi adverse (donc le roi adverse est
 capturable), le moteur capture le roi puis `Lowest_Bit` plante. N'arrive jamais
