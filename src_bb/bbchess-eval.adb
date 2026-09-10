@@ -272,6 +272,17 @@ package body BBChess.Eval is
       end case;
    end PST;
 
+   -- Flat (piece, square) table combining material and PST, precomputed at
+   -- elaboration so the hot material loop is a single lookup per piece.
+   type Piece_Square_Table is array (Piece_Type, Square_Type) of Score_Type;
+   Material_PST : Piece_Square_Table := (others => (others => 0));
+
+   -- King-attack zones indexed by king square: the squares at king distance
+   -- 1 (including the king square itself) and 2, precomputed to avoid the
+   -- per-call expansion in King_Safety.
+   Near_Zone : array (Square_Type) of Bitboard := (others => 0);
+   Far_Zone  : array (Square_Type) of Bitboard := (others => 0);
+
    -- Row of Square from the given side's own point of view (same convention
    -- as the PSTs).
    function Own_Row (Color : in Color_Type; Sq : in Square_Type) return Natural is
@@ -424,8 +435,8 @@ package body BBChess.Eval is
         Lowest_Bit (Position.Pieces (Make (Color, King)));
       King_File : constant Natural := File_Of (King_Sq);
       -- The king square itself is included so that a direct check counts.
-      Near     : constant Bitboard := King_Attacks (King_Sq) or Bit (King_Sq);
-      Far      : Bitboard := 0;
+      Near     : constant Bitboard := Near_Zone (King_Sq);
+      Far      : constant Bitboard := Far_Zone (King_Sq);
       Near_Danger : Score_Type := 0;
       Far_Danger  : Score_Type := 0;
       Attackers   : Natural := 0;
@@ -433,20 +444,6 @@ package body BBChess.Eval is
       Lo, Hi   : Integer;
       B        : Bitboard;
    begin
-      -- Squares at king-distance 2 (one more king step from Near, minus
-      -- Near): a piece aiming there can join an attack soon, so it is
-      -- counted with a lower weight. This is what lets the evaluation see
-      -- an attack building up before the pieces actually reach the king.
-      declare
-         X : Bitboard := Near;
-      begin
-         while X /= 0 loop
-            Far := Far or King_Attacks (Lowest_Bit (X));
-            X := X and (X - 1);
-         end loop;
-      end;
-      Far := Far and not Near;
-
       -- Weighted enemy attackers aiming at the king's square or the squares
       -- around it. The danger is applied non-linearly (a coordinated attack
       -- by several pieces is much worse than the sum of the attackers).
@@ -769,8 +766,7 @@ package body BBChess.Eval is
                      declare
                         Sq : constant Square_Type := Lowest_Bit (B);
                      begin
-                        Result := Result +
-                          Sign * (Piece_Value (Kind) + PST (Kind, Color, Sq));
+                        Result := Result + Sign * Material_PST (Piece, Sq);
                      end;
                      B := B and (B - 1);
                   end loop;
@@ -806,4 +802,27 @@ package body BBChess.Eval is
       end if;
    end Evaluate;
 
+begin
+   -- Precompute the flat material+PST table.
+   for P in Piece_Type loop
+      for S in Square_Type loop
+         Material_PST (P, S) :=
+           Piece_Value (Kind (P)) + PST (Kind (P), Color (P), S);
+      end loop;
+   end loop;
+
+   -- Precompute the king near/far attack zones.
+   for S in Square_Type loop
+      Near_Zone (S) := King_Attacks (S) or Bit (S);
+      declare
+         X : Bitboard := Near_Zone (S);
+         F : Bitboard := 0;
+      begin
+         while X /= 0 loop
+            F := F or King_Attacks (Lowest_Bit (X));
+            X := X and (X - 1);
+         end loop;
+         Far_Zone (S) := F and not Near_Zone (S);
+      end;
+   end loop;
 end BBChess.Eval;
