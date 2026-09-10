@@ -272,10 +272,12 @@ la référence `bb-1.0` contre **GNU Chess** à 30 s+1 s donne **BB 0-9-3**
 (3 nulles, GNU ~2500 Elo reste hors de portée), ce qui situe la marge de
 progression restante.
 
-**Bug préexistant repéré (non corrigé)** : sur un **FEN illégal** où le camp au
+**Bug préexistant repéré (corrigé)** : sur un **FEN illégal** où le camp au
 trait est « en échec » vis-à-vis du roi adverse (donc le roi adverse est
-capturable), le moteur capture le roi puis `Lowest_Bit` plante. N'arrive jamais
-dans une partie légale ; à durcir plus tard (validation de FEN à l'entrée).
+capturable), le moteur capturait le roi puis `Lowest_Bit` plantait. `Load`
+**valide désormais le FEN à l'entrée** : exactement un roi par camp, et le camp
+qui n'a pas le trait ne doit pas être en échec (sinon `Constraint_Error`,
+signalée par `Error (bad FEN)` côté XBoard). Deux tests dédiés couvrent le cas.
 
 ## 7. État actuel & chantiers restants
 

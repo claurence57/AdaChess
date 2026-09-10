@@ -211,6 +211,31 @@ package body BBChess.Self_Tests is
 
       Ada.Text_IO.Put_Line ("perft tests OK");
 
+      -- Illegal FENs must be rejected at load time, in particular a position
+      -- that leaves the side not to move in check (a capturable king would
+      -- otherwise crash the search when it looks for a missing king).
+      declare
+         P        : Position_Type;
+         Rejected : Boolean := False;
+      begin
+         begin
+            Load (P, "7k/8/8/8/8/8/8/K6R w - - 0 1");   -- Black king in check
+         exception
+            when Constraint_Error => Rejected := True;
+         end;
+         Assert (Rejected, "FEN leaving the side not to move in check must be rejected");
+
+         Rejected := False;
+         begin
+            Load (P, "8/8/8/8/8/8/8/K7 w - - 0 1");    -- missing Black king
+         exception
+            when Constraint_Error => Rejected := True;
+         end;
+         Assert (Rejected, "FEN without one king per side must be rejected");
+      end;
+
+      Ada.Text_IO.Put_Line ("FEN validation OK");
+
       -- Evaluation + search sanity. Static is the tempo-free, fully
       -- symmetric core (0 on the initial position); Evaluate adds Tempo for
       -- the side to move (White on the initial position).

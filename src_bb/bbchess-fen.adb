@@ -5,6 +5,9 @@
 with BBChess.Hash;
 use BBChess.Hash;
 
+with BBChess.Movegen;
+use BBChess.Movegen;
+
 package body BBChess.Fen is
 
    function Kind_Of (C : in Character) return Kind_Type is
@@ -171,6 +174,26 @@ package body BBChess.Fen is
             end;
          end if;
       end;
+
+      -- Validate the position: exactly one king per side and the side that
+      -- does not have the move must not be left in check. This rejects
+      -- illegal FENs (e.g. a capturable king) that would otherwise crash the
+      -- search when it tries to locate a missing king.
+      declare
+         White_Kings : constant Natural :=
+           Popcount (Pos.Pieces (Make (White, King)));
+         Black_Kings : constant Natural :=
+           Popcount (Pos.Pieces (Make (Black, King)));
+      begin
+         if White_Kings /= 1 or else Black_Kings /= 1 then
+            raise Constraint_Error with "FEN must have exactly one king per side";
+         end if;
+      end;
+
+      if King_In_Check (Pos, Opposite (Pos.Side)) then
+         raise Constraint_Error with
+           "FEN leaves the side not to move in check";
+      end if;
 
       Position := Pos;
       Position.Key := Hash.Compute (Position);

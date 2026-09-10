@@ -15,6 +15,8 @@ use BBChess.Board;
 package BBChess.Fen is
 
    procedure Load (Position : out Position_Type; Text : in String);
-   -- Parse a FEN string into Position. Raises Constraint_Error on garbage.
+   -- Parse a FEN string into Position. Raises Constraint_Error on garbage
+   -- and on illegal positions: the board must contain exactly one king per
+   -- side and the side that does not have the move must not be in check.
 
 end BBChess.Fen;
