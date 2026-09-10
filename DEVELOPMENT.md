@@ -300,6 +300,36 @@ Ainsi cutechess enregistre l'évaluation et la profondeur de BB dans le PGN
 la qualité des évaluations. Pas de PV complète pour l'instant (seulement le
 meilleur coup).
 
+## 7bis. Sécurité du roi renforcée (motif `Bxh7+`)
+
+Diagnostic (via `post` et GNU Chess) : sur le « cadeau grec »
+`12.Bxh7+ Kxh7 13.Rxe7 Nxe7`, BB n'évaluait la position qu'à **+30/40** (Blanc)
+alors que GNU la voit **+150** — l'attaque sur le roi noir était sous-évaluée,
+et BB tombait dans le piège (Noir) ou abandonnait le sacrifice (Blanc).
+
+Améliorations dans `King_Safety` (`bbchess-eval.adb`), générales et symétriques :
+- la **case du roi** est incluse dans la zone attaquée (un échec compte) ;
+- **zone à distance 2** (« Far », demi-poids) : un attaquant qui peut rejoindre
+  l'attaque est compté, ce qui capte l'attaque *potentielle* ;
+- danger **non linéaire** : `Near_Danger * (Nb_Attaquants + 1) / 2` (une attaque
+  coordonnée pèse plus que la somme) ;
+- poids d'attaque relevés (C/F 10, T 16, D 24) ;
+- **roi exposé** : pénalité si le roi a quitté sa rangée arrière (`Own_Row > 0`).
+
+Résultats A/B vs `bb-1.0` (1 s+0,1 s) :
+- réglage conservateur : neutre (3-3-14) ;
+- réglage renforcé (retenu) : **REF 9-18-13 NEW** sur 40 parties
+  (NEW ≈ **+80 Elo**, LOS ≈ 96 %) — gain net, self-test et symétrie verts.
+
+Contrôle à **30 s+1 s, 12 parties** (graine 7) : **REF 5-4-3 NEW**
+(NEW ≈ −29 Elo, LOS 63 %) — dans le bruit (±187 Elo), donc **non confirmé à
+temps long** ; à re-mesurer sur plus de parties. Le gain est net en blitz.
+
+Limite : le motif n'est pas « résolu » au sens où, sans profondeur suffisante,
+l'attaque reste en partie invisible statiquement (BB continue de jouer `exd5` à
+basse profondeur). L'amélioration est cependant générale et mesure un gain réel
+en blitz.
+
 ## 8. État actuel & chantiers restants
 
 **Validations** : `./bin_bb/adachess_bb --selftest` passe (perft + roque + éval +

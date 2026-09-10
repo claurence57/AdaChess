@@ -398,10 +398,13 @@ package body BBChess.Eval is
    Pawn_Shield_Row3      : constant Score_Type := 3;
    Open_File_Near_King   : constant Score_Type := 10;
    Pawn_Storm            : constant Score_Type := 3;
-   King_Attack_Knight    : constant Score_Type := 5;
-   King_Attack_Bishop    : constant Score_Type := 5;
-   King_Attack_Rook      : constant Score_Type := 8;
-   King_Attack_Queen     : constant Score_Type := 12;
+   King_Attack_Knight    : constant Score_Type := 10;
+   King_Attack_Bishop    : constant Score_Type := 10;
+   King_Attack_Rook      : constant Score_Type := 16;
+   King_Attack_Queen     : constant Score_Type := 24;
+   -- Penalty when the king has left its back rank in the middlegame (it is
+   -- then much easier to expose to an attack).
+   Exposed_King          : constant Score_Type := 28;
    King_Safety_Min_Phase : constant Natural := 20;
    -- Below this phase, king safety is irrelevant (its weight is ~0 anyway)
    -- and is not even computed, which keeps the endgame evaluation cheap.
@@ -420,14 +423,42 @@ package body BBChess.Eval is
       King_Sq  : constant Square_Type :=
         Lowest_Bit (Position.Pieces (Make (Color, King)));
       King_File : constant Natural := File_Of (King_Sq);
-      Zone     : constant Bitboard := King_Attacks (King_Sq);
-      Result   : Score_Type := 0;
+      -- The king square itself is included so that a direct check counts.
+      Near     : constant Bitboard := King_Attacks (King_Sq) or Bit (King_Sq);
+      Far      : Bitboard := 0;
+      Near_Danger : Score_Type := 0;
+      Far_Danger  : Score_Type := 0;
+      Attackers   : Natural := 0;
+      Result    : Score_Type := 0;
       Lo, Hi   : Integer;
       B        : Bitboard;
    begin
-      -- Weighted enemy attackers aiming at the squares around our king.
+      -- Squares at king-distance 2 (one more king step from Near, minus
+      -- Near): a piece aiming there can join an attack soon, so it is
+      -- counted with a lower weight. This is what lets the evaluation see
+      -- an attack building up before the pieces actually reach the king.
+      declare
+         X : Bitboard := Near;
+      begin
+         while X /= 0 loop
+            Far := Far or King_Attacks (Lowest_Bit (X));
+            X := X and (X - 1);
+         end loop;
+      end;
+      Far := Far and not Near;
+
+      -- Weighted enemy attackers aiming at the king's square or the squares
+      -- around it. The danger is applied non-linearly (a coordinated attack
+      -- by several pieces is much worse than the sum of the attackers).
       for Kind in Knight .. Queen loop
          declare
+            W : constant Score_Type :=
+              (case Kind is
+                  when Knight => King_Attack_Knight,
+                  when Bishop => King_Attack_Bishop,
+                  when Rook   => King_Attack_Rook,
+                  when Queen  => King_Attack_Queen,
+                  when others => 0);
             Pieces : Bitboard := Position.Pieces (Make (Enemy, Kind));
          begin
             while Pieces /= 0 loop
@@ -435,20 +466,25 @@ package body BBChess.Eval is
                   Sq  : constant Square_Type := Lowest_Bit (Pieces);
                   Att : constant Bitboard := Piece_Attacks (Kind, Sq, Occ);
                begin
-                  if (Att and Zone) /= 0 then
-                     case Kind is
-                        when Knight => Result := Result - King_Attack_Knight;
-                        when Bishop => Result := Result - King_Attack_Bishop;
-                        when Rook   => Result := Result - King_Attack_Rook;
-                        when Queen  => Result := Result - King_Attack_Queen;
-                        when others => null;
-                     end case;
+                  if (Att and Near) /= 0 then
+                     Attackers := Attackers + 1;
+                     Near_Danger := Near_Danger + W;
+                  elsif (Att and Far) /= 0 then
+                     Far_Danger := Far_Danger + W / 2;
                   end if;
                end;
                Pieces := Pieces and (Pieces - 1);
             end loop;
          end;
       end loop;
+      Result := Result
+        - (Near_Danger * Score_Type (Attackers + 1)) / 2
+        - Far_Danger;
+
+      -- A king that has left its back rank is exposed.
+      if Own_Row (Color, King_Sq) > 0 then
+         Result := Result - Exposed_King;
+      end if;
 
       -- Pawn shield / open files / pawn storm, only for a wing (castled or
       -- edge) king. A central king gets no shelter but is already punished
