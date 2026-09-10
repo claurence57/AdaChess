@@ -39,11 +39,16 @@ package BBChess.Board is
    type Castle_Side_Type is (King_Side, Queen_Side);
    type Castle_Rights_Type is array (Color_Type, Castle_Side_Type) of Boolean;
 
-   -- Position data: twelve piece bitboards plus the full game state.
+   -- Position data: twelve piece bitboards plus the full game state. The
+   -- total and per-color occupancies are maintained incrementally by
+   -- Put_Piece / Remove_Piece (every mutation goes through them).
    type Piece_Board_Array is array (Piece_Type) of Bitboard;
+   type Color_Board_Array is array (Color_Type) of Bitboard;
    type Position_Type is
       record
          Pieces      : Piece_Board_Array := (others => 0);
+         All_Occ     : Bitboard := 0;
+         Color_Occ   : Color_Board_Array := (others => 0);
          Side        : Color_Type := White;
          Castle      : Castle_Rights_Type := (others => (others => False));
          En_Passant  : Integer := Ep_None;

@@ -86,18 +86,24 @@ package body BBChess.Moves is
             Remove_Piece (Position, Make (Opp, Pawn), Cap_Sq);
          end;
       else
-         declare
-            Victim : Piece_Type;
-            Present : Boolean;
-         begin
-            Present := Piece_At (Position, Move.To, Victim);
-            if Present and then Color (Victim) = Opp then
+         -- A capture is detected with the opponent's occupancy (O(1)); the
+         -- victim kind is only looked up for the (few) captures.
+         if (Position.Color_Occ (Opp) and Bit (Move.To)) /= 0 then
+            declare
+               Victim : Piece_Type := Make (Opp, Pawn);
+            begin
+               for K in Kind_Type loop
+                  if (Position.Pieces (Make (Opp, K)) and Bit (Move.To)) /= 0 then
+                     Victim := Make (Opp, K);
+                     exit;
+                  end if;
+               end loop;
                Undo.Captured        := Victim;
                Undo.Has_Captured    := True;
                Undo.Captured_Square := Move.To;
                Remove_Piece (Position, Victim, Move.To);
-            end if;
-         end;
+            end;
+         end if;
       end if;
 
       -- Place the moving (or promoted) piece on the destination.

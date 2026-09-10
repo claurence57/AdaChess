@@ -18,14 +18,8 @@ package body BBChess.Board is
 
    function Color_Board (Position : in Position_Type; Color : in Color_Type)
      return Bitboard is
-      Result : Bitboard := 0;
    begin
-      for Piece in Piece_Type loop
-         if Pieces.Color (Piece) = Color then
-            Result := Result or Position.Pieces (Piece);
-         end if;
-      end loop;
-      return Result;
+      return Position.Color_Occ (Color);
    end Color_Board;
 
    --------------
@@ -33,12 +27,8 @@ package body BBChess.Board is
    --------------
 
    function Occupancy (Position : in Position_Type) return Bitboard is
-      Result : Bitboard := 0;
    begin
-      for Piece in Piece_Type loop
-         Result := Result or Position.Pieces (Piece);
-      end loop;
-      return Result;
+      return Position.All_Occ;
    end Occupancy;
 
    --------------
@@ -58,8 +48,12 @@ package body BBChess.Board is
    procedure Put_Piece
      (Position : in out Position_Type; Piece : in Piece_Type; Square : in Square_Type)
    is
+      M : constant Bitboard := Bit (Square);
    begin
-      Position.Pieces (Piece) := Position.Pieces (Piece) or Bit (Square);
+      Position.Pieces (Piece) := Position.Pieces (Piece) or M;
+      Position.All_Occ := Position.All_Occ or M;
+      Position.Color_Occ (Pieces.Color (Piece)) :=
+        Position.Color_Occ (Pieces.Color (Piece)) or M;
    end Put_Piece;
 
    -----------------
@@ -69,8 +63,12 @@ package body BBChess.Board is
    procedure Remove_Piece
      (Position : in out Position_Type; Piece : in Piece_Type; Square : in Square_Type)
    is
+      M : constant Bitboard := not Bit (Square);
    begin
-      Position.Pieces (Piece) := Position.Pieces (Piece) and not Bit (Square);
+      Position.Pieces (Piece) := Position.Pieces (Piece) and M;
+      Position.All_Occ := Position.All_Occ and M;
+      Position.Color_Occ (Pieces.Color (Piece)) :=
+        Position.Color_Occ (Pieces.Color (Piece)) and M;
    end Remove_Piece;
 
    --------------

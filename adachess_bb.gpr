@@ -29,7 +29,7 @@ project AdaChess_BB is
       case Mode is
          when "release" =>
             for Switches ("ada") use
-              ("-gnat2012", "-gnatp", "-gnatn", "-O3", "-gnatf",
+              ("-gnat2012", "-gnatp", "-gnatN", "-O3", "-gnatf",
                "-mpopcnt", "-mbmi");
             for Switches ("c") use ("-O3", "-mpopcnt", "-mbmi");
          when "debug" =>
