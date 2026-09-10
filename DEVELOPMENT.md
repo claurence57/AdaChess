@@ -279,7 +279,28 @@ capturable), le moteur capturait le roi puis `Lowest_Bit` plantait. `Load`
 qui n'a pas le trait ne doit pas être en échec (sinon `Constraint_Error`,
 signalée par `Error (bad FEN)` côté XBoard). Deux tests dédiés couvrent le cas.
 
-## 7. État actuel & chantiers restants
+## 7. Instrumentation `post`/`info`
+
+Le moteur gère les commandes XBoard **`post`** / **`nopost`** : quand `post` est
+actif, chaque itération complétée du deepening (recherche temporisée) émet une
+ligne au format « thinking output » XBoard :
+
+```
+depth score time nodes bestmove
+```
+
+- `score` en centipawns du point de vue du trait ; les mats sont émis en
+  `100000 - plies` (convention comprise par cutechess/XBoard, cf.
+  `XboardEngine::adaptScore`) ;
+- `time` en centisecondes ; `nodes` = nœuds de l'itération ;
+- `bestmove` en notation coordonnée.
+
+Ainsi cutechess enregistre l'évaluation et la profondeur de BB dans le PGN
+(`{+0.23/7 0.11s}`), ce qui permet de diagnostiquer la profondeur atteinte et
+la qualité des évaluations. Pas de PV complète pour l'instant (seulement le
+meilleur coup).
+
+## 8. État actuel & chantiers restants
 
 **Validations** : `./bin_bb/adachess_bb --selftest` passe (perft + roque + éval +
 recherche + **SEE** + répétition). Self-tests et perft ne doivent **jamais

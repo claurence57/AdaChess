@@ -412,11 +412,16 @@ begin
             -- "?" is the XBoard prompt asking the engine to move now.
             Play_If_My_Turn;
 
+         elsif Cmd = "post" then
+            Set_Post (True);
+
+         elsif Cmd = "nopost" then
+            Set_Post (False);
+
          elsif Cmd = "accepted" or else Cmd = "rejected" then
             null;
 
-         elsif Cmd = "post" or else Cmd = "nopost"
-           or else Cmd = "easy" or else Cmd = "hard"
+         elsif Cmd = "easy" or else Cmd = "hard"
            or else Cmd = "hint"
          then
             null;

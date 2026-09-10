@@ -12,6 +12,8 @@
 with Ada.Real_Time;
 use Ada.Real_Time;
 
+with Ada.Text_IO;
+
 with BBChess.Hash;
 use BBChess.Hash;
 
@@ -20,6 +22,9 @@ use BBChess.Eval;
 
 with BBChess.See;
 use BBChess.See;
+
+with BBChess.Notation;
+use BBChess.Notation;
 
 package body BBChess.Search is
 
@@ -237,6 +242,51 @@ package body BBChess.Search is
          Game_Keys (I) := Keys (I);
       end loop;
    end Set_Game_History;
+
+   -- XBoard thinking output ("post"/"nopost"). When enabled, the timed
+   -- search prints one line per completed iteration:
+   --    depth score time nodes bestmove
+   -- (score in centipawns from the side to move; mate as 100000 - plies;
+   -- time in centiseconds; bestmove in coordinate notation).
+   Post_Output : Boolean := False;
+
+   procedure Set_Post (On : in Boolean) is
+   begin
+      Post_Output := On;
+   end Set_Post;
+
+   -- Report one completed iteration in XBoard thinking format.
+   procedure Report_Iteration (Depth      : in Natural;
+                               Score      : in Score_Type;
+                               Elapsed    : in Duration;
+                               Nodes      : in Natural;
+                               Best       : in Move_Type) is
+      Centis : constant Long_Integer :=
+        Long_Integer (Elapsed * 100.0);
+      Disp   : Score_Type := Score;
+   begin
+      if not Post_Output then
+         return;
+      end if;
+
+      -- Mate scores: emit 100000 - plies so cutechess/XBoard can display
+      -- a proper "mate in N" (see XboardEngine::adaptScore).
+      if Score >= Mate_Threshold then
+         Disp := 100_000 - (Mate_Score - Score);
+      elsif Score <= -Mate_Threshold then
+         Disp := -(100_000 - (Mate_Score + Score));
+      end if;
+
+      Ada.Text_IO.Put
+        (Natural'Image (Depth) & " " & Score_Type'Image (Disp)
+         & " " & Long_Integer'Image (Centis)
+         & " " & Natural'Image (Nodes));
+      if Best /= Empty_Move then
+         Ada.Text_IO.Put (" " & To_String (Best));
+      end if;
+      Ada.Text_IO.New_Line;
+      Ada.Text_IO.Flush;
+   end Report_Iteration;
 
    -- True when Position has already occurred twice before on the current
    -- line: once is not enough (that would only be the second visit). The
@@ -903,6 +953,8 @@ package body BBChess.Search is
       Alpha       : Score_Type := -Infinity;
       Beta        : Score_Type := Infinity;
       Score       : Score_Type;
+      T0          : Time := Clock;      -- start of this search (reporting)
+      Nodes_Base  : Natural := 0;       -- nodes before this search
    begin
       if Max_Depth = 0 then
          return Empty_Move;
@@ -918,6 +970,8 @@ package body BBChess.Search is
       if Time_Alloc > 0.0 then
          Arm_Time_Limit (Time_Alloc);
       end if;
+      T0 := Clock;
+      Nodes_Base := Nodes_Count;
 
       begin
          for D in 1 .. Max_Depth loop
@@ -943,6 +997,9 @@ package body BBChess.Search is
             end if;
             Best_Score := Score;
             Completed := True;
+
+            Report_Iteration (D, Best_Score, To_Duration (Clock - T0),
+                              Nodes_Count - Nodes_Base, Best);
 
             exit when Abs (Best_Score) >= Mate_Score - 200;
          end loop;

@@ -36,6 +36,11 @@ package BBChess.Search is
    -- Record the keys of every position of the game so far (including the
    -- current one). Called before each timed search.
 
+   procedure Set_Post (On : in Boolean);
+   -- Enable/disable the XBoard "thinking output" (the "post"/"nopost"
+   -- commands): when on, each completed iterative-deepening iteration
+   -- prints a line "depth score time nodes bestmove".
+
    function Best_Move (Position : in Position_Type; Depth : in Natural)
      return Move_Type;
    -- Best move found by a fixed-depth iterative search from Position.
