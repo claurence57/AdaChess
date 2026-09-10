@@ -64,87 +64,52 @@ package body BBChess.Movegen is
    -- Pinned mask --
    -----------------
 
-   -- A piece of Color is "absolutely pinned" when it stands between its own
-   -- king and an enemy sliding piece of matching direction. Such a piece
-   -- cannot move off the pin line without exposing the king.
-   type Pin_Delta is
-      record
-         DF, DR : Integer;
-      end record;
-
-   type Pin_Array is array (1 .. 4) of Pin_Delta;
-   type Pin_Set is array (1 .. 2) of Pin_Array;
-
-   Deltas_All : constant Pin_Set :=
-     (((1, 1), (1, -1), (-1, 1), (-1, -1)),
-      ((1, 0), (-1, 0), (0, 1), (0, -1)));
-
-   function On_Board (F, R : in Integer) return Boolean is
-     (F in 0 .. 7 and R in 0 .. 7);
-
+   -- A piece of Color is "absolutely pinned" when it is the only blocker
+   -- between its own king and an enemy sliding piece of matching direction.
+   -- Computed from the full (empty-board) rays of the king rather than a
+   -- per-square walk: the potential pinners are the enemy sliders on those
+   -- rays, and a pin exists when exactly one friendly piece stands between.
    function Pin_Mask (Position : in Position_Type; Color : in Color_Type)
-     return Bitboard is
-      King_File : constant Integer := Integer (File_Of
-        (Lowest_Bit (Position.Pieces (Make (Color, King)))));
-      King_Rank : constant Integer := Integer (Rank_Of
-        (Lowest_Bit (Position.Pieces (Make (Color, King)))));
-      Occ  : constant Bitboard := Occupancy (Position);
-      Result : Bitboard := 0;
+     return Bitboard
+   is
+      Enemy    : constant Color_Type := Opposite (Color);
+      King_Sq  : constant Square_Type :=
+        Lowest_Bit (Position.Pieces (Make (Color, King)));
+      Occ      : constant Bitboard := Occupancy (Position);
+      Own      : constant Bitboard := Position.Color_Occ (Color);
+      Rook_Q   : constant Bitboard :=
+        Position.Pieces (Make (Enemy, Rook))
+        or Position.Pieces (Make (Enemy, Queen));
+      Bish_Q   : constant Bitboard :=
+        Position.Pieces (Make (Enemy, Bishop))
+        or Position.Pieces (Make (Enemy, Queen));
+      Rook_Ray : constant Bitboard := Rook_Attacks (King_Sq, 0);
+      Bish_Ray : constant Bitboard := Bishop_Attacks (King_Sq, 0);
+      Pinners  : Bitboard := (Rook_Ray and Rook_Q) or (Bish_Ray and Bish_Q);
+      Result   : Bitboard := 0;
    begin
-      -- Dir_Kind 1 = diagonal pins (bishop/queen), 2 = orthogonal (rook/queen).
-      for Dir_Kind in 1 .. 2 loop
-         for D of Deltas_All (Dir_Kind) loop
-            declare
-               First_Seen : Natural := 64;   -- 64 = none (squares are 0..63)
-               Second_Seen : Natural := 64;
-               F : Integer := King_File + D.DF;
-               R : Integer := King_Rank + D.DR;
-            begin
-               while On_Board (F, R) loop
-                  declare
-                     Sq : constant Square_Type := Square_Type (R * 8 + F);
-                  begin
-                     if (Occ and Bit (Sq)) /= 0 then
-                        if First_Seen = 64 then
-                           First_Seen := Sq;
-                        else
-                           Second_Seen := Sq;
-                           exit;
-                        end if;
-                     end if;
-                  end;
-                  F := F + D.DF;
-                  R := R + D.DR;
-               end loop;
-
-               if First_Seen /= 64 and then Second_Seen /= 64 then
-                  declare
-                     Victim : Piece_Type;
-                     Present : Boolean;
-                  begin
-                     Present := Piece_At (Position, Square_Type (First_Seen), Victim);
-                     if Present and then Pieces.Color (Victim) = Color then
-                        declare
-                           Slide : Piece_Type;
-                           P2 : Boolean;
-                        begin
-                           P2 := Piece_At (Position, Square_Type (Second_Seen), Slide);
-                           if P2 and then Pieces.Color (Slide) = Opposite (Color) then
-                              if (Dir_Kind = 1
-                                  and then Kind (Slide) in Bishop | Queen)
-                                or else
-                                (Dir_Kind = 2
-                                 and then Kind (Slide) in Rook | Queen)
-                              then
-                                 Result := Result or Bit (Square_Type (First_Seen));
-                              end if;
-                           end if;
-                        end;
-                     end if;
-                  end;
-               end if;
-            end;
-         end loop;
+      while Pinners /= 0 loop
+         declare
+            P        : constant Square_Type := Lowest_Bit (Pinners);
+            Between  : Bitboard;
+            Blockers : Bitboard;
+         begin
+            if (Rook_Ray and Bit (P)) /= 0 then
+               Between := Rook_Attacks (King_Sq, Bit (P))
+                          and Rook_Attacks (P, Bit (King_Sq));
+            else
+               Between := Bishop_Attacks (King_Sq, Bit (P))
+                          and Bishop_Attacks (P, Bit (King_Sq));
+            end if;
+            Blockers := Between and Occ;
+            if Blockers /= 0
+              and then (Blockers and (Blockers - 1)) = 0
+              and then (Blockers and Own) /= 0
+            then
+               Result := Result or Blockers;
+            end if;
+         end;
+         Pinners := Pinners and (Pinners - 1);
       end loop;
       return Result;
    end Pin_Mask;
