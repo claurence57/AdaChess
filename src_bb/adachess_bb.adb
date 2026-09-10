@@ -233,8 +233,8 @@ begin
          if Cmd = "xboard" then
             Protocol := True;
 
-         elsif Cmd = "protover" then
-            Ada.Text_IO.Put_Line ("feature myname=""AdaChess-BB""");
+          elsif Cmd = "protover" then
+             Ada.Text_IO.Put_Line ("feature myname=""AdaChess-BB 1.0""");
             Ada.Text_IO.Put_Line ("feature setboard=1");
             Ada.Text_IO.Put_Line ("feature ping=1");
             Ada.Text_IO.Put_Line ("feature memory=1");
