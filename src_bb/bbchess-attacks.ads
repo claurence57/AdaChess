@@ -33,6 +33,17 @@ package BBChess.Attacks is
    function Queen_Attacks (Square : in Square_Type; Occupancy : in Bitboard)
      return Bitboard;
 
+   -- Square-to-square tables (empty when the two squares are not aligned).
+   --   Between (A, B) : squares strictly between A and B.
+   --   Line (A, B)    : the whole line through A and B, A and B included.
+   -- Used by check evasion and pin handling.
+   Between : array (Square_Type, Square_Type) of Bitboard := (others => (others => 0));
+   Line    : array (Square_Type, Square_Type) of Bitboard := (others => (others => 0));
+
+   -- Whole file bitboards (used for bulk pawn move generation).
+   File_A_BB : Bitboard := 0;
+   File_H_BB : Bitboard := 0;
+
 private
 
    -- Maximum index used by the magic lookup (rook relevant bits <= 12,

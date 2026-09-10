@@ -91,17 +91,9 @@ package body BBChess.Movegen is
       while Pinners /= 0 loop
          declare
             P        : constant Square_Type := Lowest_Bit (Pinners);
-            Between  : Bitboard;
             Blockers : Bitboard;
          begin
-            if (Rook_Ray and Bit (P)) /= 0 then
-               Between := Rook_Attacks (King_Sq, Bit (P))
-                          and Rook_Attacks (P, Bit (King_Sq));
-            else
-               Between := Bishop_Attacks (King_Sq, Bit (P))
-                          and Bishop_Attacks (P, Bit (King_Sq));
-            end if;
-            Blockers := Between and Occ;
+            Blockers := Between (King_Sq, P) and Occ;
             if Blockers /= 0
               and then (Blockers and (Blockers - 1)) = 0
               and then (Blockers and Own) /= 0
@@ -167,80 +159,100 @@ package body BBChess.Movegen is
          Add (Moves, Count, From, To, Pawn_Piece, Promotion, Make (Side, Knight));
       end Emit_Promotions;
 
-      procedure Add_Pawn_Moves (From : in Square_Type) is
-         F  : constant Natural := File_Of (From);
-         R  : constant Natural := Rank_Of (From);
-         Forward    : constant Integer := (if Side = White then 1 else -1);
-         Start_Rank : constant Natural := (if Side = White then 1 else 6);
-         Promo_Rank : constant Natural := (if Side = White then 7 else 0);
-      begin
-         -- Single push (or promotions when reaching the last rank).
-         if R + Forward in 0 .. 7 then
-            declare
-               To : constant Square_Type := Square_Type ((R + Forward) * 8 + F);
-            begin
-                if (Occ and Bit (To)) = 0 then
-                   if R + Forward = Promo_Rank then
-                      Emit_Promotions (From, To);
-                   elsif not Tactical then
-                      Add (Moves, Count, From, To, Pawn_Piece);
-                      if R = Start_Rank and then R + 2 * Forward in 0 .. 7 then
-                         declare
-                            To2 : constant Square_Type :=
-                              Square_Type ((R + 2 * Forward) * 8 + F);
-                         begin
-                            if (Occ and Bit (To2)) = 0 then
-                               Add (Moves, Count, From, To2, Pawn_Piece, Double_Push);
-                            end if;
-                         end;
-                      end if;
-                   end if;
-                end if;
-            end;
-         end if;
-
-         -- Captures (including en passant and capture-promotions).
-         declare
-            Targets : Bitboard := Pawn_Attacks (Side, From) and Enemy;
-         begin
-            if Position.En_Passant /= Ep_None then
-               declare
-                  Ep_Sq : constant Square_Type := Square_Type (Position.En_Passant);
-               begin
-                  if (Pawn_Attacks (Side, From) and Bit (Ep_Sq)) /= 0 then
-                     Targets := Targets or Bit (Ep_Sq);
-                  end if;
-               end;
-            end if;
-
-            while Targets /= 0 loop
-               declare
-                  To : constant Square_Type := Lowest_Bit (Targets);
-               begin
-                  if Rank_Of (To) = Promo_Rank then
-                     Emit_Promotions (From, To);
-                  elsif Position.En_Passant /= Ep_None and then
-                    Square_Type (Position.En_Passant) = To then
-                     Add (Moves, Count, From, To, Pawn_Piece, En_Passant);
-                  else
-                     Add (Moves, Count, From, To, Pawn_Piece);
-                  end if;
-                  Targets := Targets and (Targets - 1);
-               end;
-            end loop;
-         end;
-      end Add_Pawn_Moves;
-
    begin
       Count := 0;
 
-      -- Pawns.
-      Pieces := Board_Of (Pawn);
-      while Pieces /= 0 loop
-         From := Lowest_Bit (Pieces);
-         Add_Pawn_Moves (From);
-         Pieces := Pieces and (Pieces - 1);
-      end loop;
+      -- Pawns: bulk shift generation (all destinations computed at once).
+      declare
+         Pawns : constant Bitboard := Board_Of (Pawn);
+         Empty : constant Bitboard := not Occ;
+         Rank_1 : constant Bitboard := 16#00000000000000FF#;   -- black promo
+         Rank_8 : constant Bitboard := 16#FF00000000000000#;   -- white promo
+         White_Push_Rank : constant Bitboard := 16#0000000000FF0000#;
+         Black_Push_Rank : constant Bitboard := 16#0000FF0000000000#;
+
+         procedure Emit (Targets : in Bitboard; D : in Integer;
+                         Flag : in Move_Flag_Type := Quiet) is
+            T : Bitboard := Targets;
+         begin
+            while T /= 0 loop
+               declare
+                  To : constant Square_Type := Lowest_Bit (T);
+               begin
+                  Add (Moves, Count, Square_Type (Integer (To) + D),
+                       To, Pawn_Piece, Flag);
+               end;
+               T := T and (T - 1);
+            end loop;
+         end Emit;
+
+         procedure Emit_Promo (Targets : in Bitboard; D : in Integer) is
+            T : Bitboard := Targets;
+         begin
+            while T /= 0 loop
+               declare
+                  To : constant Square_Type := Lowest_Bit (T);
+               begin
+                  Emit_Promotions (Square_Type (Integer (To) + D), To);
+               end;
+               T := T and (T - 1);
+            end loop;
+         end Emit_Promo;
+
+         Push1, Dbl, Caps_L, Caps_R : Bitboard;
+      begin
+         if Side = White then
+            Push1 := (Pawns * 256) and Empty;
+            Dbl   := ((Push1 and White_Push_Rank) * 256) and Empty;
+            Caps_L := ((Pawns and not File_A_BB) * 128) and Enemy;
+            Caps_R := ((Pawns and not File_H_BB) * 512) and Enemy;
+
+            Emit_Promo (Push1 and Rank_8, -8);
+            Emit_Promo (Caps_L and Rank_8, -7);
+            Emit_Promo (Caps_R and Rank_8, -9);
+            if not Tactical then
+               Emit (Push1 and not Rank_8, -8);
+               Emit (Dbl, -16, Double_Push);
+            end if;
+            Emit (Caps_L and not Rank_8, -7);
+            Emit (Caps_R and not Rank_8, -9);
+         else
+            Push1 := (Pawns / 256) and Empty;
+            Dbl   := ((Push1 and Black_Push_Rank) / 256) and Empty;
+            Caps_L := ((Pawns and not File_A_BB) / 512) and Enemy;
+            Caps_R := ((Pawns and not File_H_BB) / 128) and Enemy;
+
+            Emit_Promo (Push1 and Rank_1, 8);
+            Emit_Promo (Caps_L and Rank_1, 9);
+            Emit_Promo (Caps_R and Rank_1, 7);
+            if not Tactical then
+               Emit (Push1 and not Rank_1, 8);
+               Emit (Dbl, 16, Double_Push);
+            end if;
+            Emit (Caps_L and not Rank_1, 9);
+            Emit (Caps_R and not Rank_1, 7);
+         end if;
+
+         -- En passant: the target square is empty, so it is not part of the
+         -- bulk captures. A friendly pawn attacking it sits on a square that
+         -- an opposite-color pawn standing there would attack.
+         if Position.En_Passant /= Ep_None then
+            declare
+               Ep_Sq     : constant Square_Type := Square_Type (Position.En_Passant);
+               Attackers : Bitboard :=
+                 Pawn_Attacks (Opposite (Side), Ep_Sq) and Pawns;
+            begin
+               while Attackers /= 0 loop
+                  declare
+                     From_Sq : constant Square_Type := Lowest_Bit (Attackers);
+                  begin
+                     Add (Moves, Count, From_Sq, Ep_Sq, Pawn_Piece, En_Passant);
+                  end;
+                  Attackers := Attackers and (Attackers - 1);
+               end loop;
+            end;
+         end if;
+      end;
 
       -- Knights.
       Pieces := Board_Of (Knight);

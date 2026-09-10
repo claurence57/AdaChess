@@ -308,4 +308,31 @@ begin
       Build_Rook_Magic (Square);
       Build_Bishop_Magic (Square);
    end loop;
+
+   -- File masks.
+   for R in 0 .. 7 loop
+      File_A_BB := File_A_BB or Bit (Square_Type (R * 8));
+      File_H_BB := File_H_BB or Bit (Square_Type (R * 8 + 7));
+   end loop;
+
+   -- Between / Line tables (both empty when the squares are not aligned).
+   for A in Square_Type loop
+      for B in Square_Type loop
+         if A /= B then
+            if (Rook_Attacks (A, 0) and Bit (B)) /= 0 then
+               Between (A, B) :=
+                 Rook_Attacks (A, Bit (B)) and Rook_Attacks (B, Bit (A));
+               Line (A, B) :=
+                 (Rook_Attacks (A, 0) and Rook_Attacks (B, 0))
+                 or Bit (A) or Bit (B);
+            elsif (Bishop_Attacks (A, 0) and Bit (B)) /= 0 then
+               Between (A, B) :=
+                 Bishop_Attacks (A, Bit (B)) and Bishop_Attacks (B, Bit (A));
+               Line (A, B) :=
+                 (Bishop_Attacks (A, 0) and Bishop_Attacks (B, 0))
+                 or Bit (A) or Bit (B);
+            end if;
+         end if;
+      end loop;
+   end loop;
 end BBChess.Attacks;

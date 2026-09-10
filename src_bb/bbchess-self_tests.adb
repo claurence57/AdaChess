@@ -83,6 +83,23 @@ package body BBChess.Self_Tests is
       Assert (Popcount (Knight_Attacks (1)) = 3, "knight on b1 attacks 3 squares");
       Assert (Popcount (Knight_Attacks (27)) = 8, "knight on d4 attacks 8 squares");
       Assert (Popcount (King_Attacks (0)) = 3, "king on a1 attacks 3 squares");
+
+      -- Between / Line tables (a1 = 0, b2 = 9, a2 = 8, a4 = 24, h8 = 63).
+      Assert (Between (0, 24) = (Bit (8) or Bit (16)),
+              "between a1 and a4");
+      Assert (Between (0, 63) = (Bit (9) or Bit (18) or Bit (27)
+                                 or Bit (36) or Bit (45) or Bit (54)),
+              "between a1 and h8");
+      Assert (Between (0, 10) = 0, "non-aligned squares have no between");
+      Assert (Line (0, 56) = (Bit (0) or Bit (8) or Bit (16) or Bit (24)
+                              or Bit (32) or Bit (40) or Bit (48) or Bit (56)),
+              "line a1-a8 is the a-file");
+      Assert ((Line (0, 63) and Bit (9)) /= 0, "line a1-h8 contains b2");
+      Assert (Line (0, 10) = 0, "non-aligned squares have no line");
+      Assert (File_A_BB = (Bit (0) or Bit (8) or Bit (16) or Bit (24)
+                           or Bit (32) or Bit (40) or Bit (48) or Bit (56)),
+              "file A mask");
+      Assert ((File_A_BB and File_H_BB) = 0, "file A and H are disjoint");
       Assert (Popcount (King_Attacks (27)) = 8, "king on d4 attacks 8 squares");
       Assert (Popcount (Pawn_Attacks (White, 8)) = 1, "white pawn on a2 attacks 1");
       Assert (Pawn_Attacks (White, 8) = Bit (17), "white pawn on a2 attacks b3");
@@ -156,6 +173,7 @@ package body BBChess.Self_Tests is
          Load (P, "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
          Assert (Nodes (P, 1) = 48, "castling perft d1 must be 48");
          Assert (Nodes (P, 2) = 2039, "castling perft d2 must be 2039");
+         Assert (Nodes (P, 3) = 97_862, "castling perft d3 must be 97862");
       end;
 
       declare
