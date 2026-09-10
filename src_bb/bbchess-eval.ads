@@ -46,4 +46,10 @@ package BBChess.Eval is
    -- initialize Position.Material after Load / Start_Position and by the
    -- self test that checks the incremental update.
 
+   -- Automatic tuning interface: the scalar evaluation constants are held in
+   -- a table and can be overridden by name (e.g. "P_Mobility_N 5").
+   procedure Set_Param (Name : in String; Value : in Integer);
+   procedure Load_Params (File_Name : in String);
+   procedure Dump_Params;
+
 end BBChess.Eval;

@@ -412,6 +412,25 @@ Les longues lignes `position ... moves ...` (parties > ~50 coups) étaient
 **coupées** par `Get_Line`, ce qui désynchronisait la position et produisait des
 coups illégaux.
 
+## 7sexies. Tuner d'évaluation automatique
+
+Les constantes scalaires de l'évaluation sont regroupées dans un tableau
+`Params` (`bbchess-eval.adb`) ; les constantes nommées sont des `renames`, donc
+le reste de l'éval est inchangé. Interface exposée : `Set_Param`,
+`Load_Params`, `Dump_Params`. Modes de ligne de commande :
+- `--dump-params` : affiche `Nom Valeur` (une par ligne) ;
+- `--eval-fens <fichier>` : lit des positions (`FEN` ou `FEN;résultat`) et sort
+  l'éval statique blanche, une par ligne ;
+- `--params <fichier>` : charge des paramètres avant tout mode.
+
+Outillage (`scripts/`) :
+- `gen_dataset.py` : convertit des PGN en `FEN;résultat` (résultat du point de
+  vue blanc, échantillonnage tous les 4 coups, après l'ouverture) via
+  `python-chess` ;
+- `tune.py` : descente de coordonnées type **Texel** (minimise l'écart
+  `sigmoid(K·eval/400)` vs résultat, `K = 1.13`), en pilotant le moteur par
+  `--eval-fens`/`--params`.
+
 ## 8. État actuel & chantiers restants
 
 **Validations** : `./bin_bb/adachess_bb --selftest` passe (perft + roque + éval +

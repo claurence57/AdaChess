@@ -36,6 +36,10 @@
 with BBChess.Attacks;
 use BBChess.Attacks;
 
+with Ada.Text_IO;
+with Ada.IO_Exceptions;
+with Ada.Characters.Handling;
+
 package body BBChess.Eval is
 
    type PST_Table is array (Natural range 0 .. 7, Natural range 0 .. 7)
@@ -239,14 +243,69 @@ package body BBChess.Eval is
       (-15, -10, -5, 0, 0, -5, -10, -15),
       (-20, -15, -10, -5, -5, -10, -15, -20));
 
+   -- Tunable evaluation parameters (see the renames further down and the
+   -- Set_Param / Load_Params / Dump_Params interface).
+   type Param_Id is
+     (P_Pawn, P_Knight, P_Bishop, P_Rook, P_Queen,
+      P_Bishop_Pair_Op, P_Bishop_Pair_Eg,
+      P_Mobility_N, P_Mobility_B, P_Mobility_R, P_Mobility_Q,
+      P_Rook7_Op, P_Rook7_Eg, P_Rook7_King,
+      P_RookOpen_Op, P_RookOpen_Eg, P_RookSemi_Op, P_RookSemi_Eg,
+      P_RookConn_Op, P_RookConn_Eg,
+      P_Doubled_Op, P_Doubled_Eg, P_Isolated_Op, P_Isolated_Eg,
+      P_Protected_Op, P_Protected_Eg, P_Outside_Op, P_Outside_Eg,
+      P_Shield1, P_Shield2, P_Shield3, P_OpenFile, P_Storm,
+      P_Atk_N, P_Atk_B, P_Atk_R, P_Atk_Q, P_Exposed);
+
+   type Param_Array is array (Param_Id) of Integer;
+   Params : Param_Array :=
+     (P_Pawn            => 100,
+      P_Knight          => 320,
+      P_Bishop          => 330,
+      P_Rook            => 500,
+      P_Queen           => 900,
+      P_Bishop_Pair_Op  => 20,
+      P_Bishop_Pair_Eg  => 45,
+      P_Mobility_N      => 4,
+      P_Mobility_B      => 4,
+      P_Mobility_R      => 2,
+      P_Mobility_Q      => 1,
+      P_Rook7_Op        => 15,
+      P_Rook7_Eg        => 35,
+      P_Rook7_King      => 25,
+      P_RookOpen_Op     => 22,
+      P_RookOpen_Eg     => 16,
+      P_RookSemi_Op     => 10,
+      P_RookSemi_Eg     => 6,
+      P_RookConn_Op     => 10,
+      P_RookConn_Eg     => 14,
+      P_Doubled_Op      => 8,
+      P_Doubled_Eg      => 5,
+      P_Isolated_Op     => 10,
+      P_Isolated_Eg     => 12,
+      P_Protected_Op    => 40,
+      P_Protected_Eg    => 50,
+      P_Outside_Op      => 10,
+      P_Outside_Eg      => 15,
+      P_Shield1         => 8,
+      P_Shield2         => 6,
+      P_Shield3         => 3,
+      P_OpenFile        => 10,
+      P_Storm           => 3,
+      P_Atk_N           => 10,
+      P_Atk_B           => 10,
+      P_Atk_R           => 16,
+      P_Atk_Q           => 24,
+      P_Exposed         => 28);
+
    function Piece_Value (Kind : in Kind_Type) return Score_Type is
    begin
       case Kind is
-         when Pawn   => return 100;
-         when Knight => return 320;
-         when Bishop => return 330;
-         when Rook   => return 500;
-         when Queen  => return 900;
+         when Pawn   => return Score_Type (Params (P_Pawn));
+         when Knight => return Score_Type (Params (P_Knight));
+         when Bishop => return Score_Type (Params (P_Bishop));
+         when Rook   => return Score_Type (Params (P_Rook));
+         when Queen  => return Score_Type (Params (P_Queen));
          when King   => return 0;
       end case;
    end Piece_Value;
@@ -282,6 +341,86 @@ package body BBChess.Eval is
    -- per-call expansion in King_Safety.
    Near_Zone : array (Square_Type) of Bitboard := (others => 0);
    Far_Zone  : array (Square_Type) of Bitboard := (others => 0);
+
+   -- Rebuild the flat material+PST table after a piece value changed.
+   procedure Rebuild_Material_PST is
+   begin
+      for P in Piece_Type loop
+         for S in Square_Type loop
+            Material_PST (P, S) :=
+              Piece_Value (Kind (P)) + PST (Kind (P), Color (P), S);
+         end loop;
+      end loop;
+   end Rebuild_Material_PST;
+
+   procedure Set_Param (Name : in String; Value : in Integer) is
+      use Ada.Characters.Handling;
+      U : constant String := To_Upper (Name);
+   begin
+      for Id in Param_Id loop
+         if U = Param_Id'Image (Id) then
+            Params (Id) := Value;
+            if Id in P_Pawn | P_Knight | P_Bishop | P_Rook | P_Queen then
+               Rebuild_Material_PST;
+            end if;
+            return;
+         end if;
+      end loop;
+   end Set_Param;
+
+   procedure Load_Params (File_Name : in String) is
+      F    : Ada.Text_IO.File_Type;
+      Line : String (1 .. 256);
+      Last : Natural;
+   begin
+      Ada.Text_IO.Open (F, Ada.Text_IO.In_File, File_Name);
+      while not Ada.Text_IO.End_Of_File (F) loop
+         Ada.Text_IO.Get_Line (F, Line, Last);
+         declare
+            S        : constant String := Line (1 .. Last);
+            I        : Natural := S'First;
+            Name_End : Natural;
+         begin
+            while I <= S'Last and then S (I) = ' ' loop
+               I := I + 1;
+            end loop;
+            Name_End := I;
+            while Name_End <= S'Last and then S (Name_End) /= ' ' loop
+               Name_End := Name_End + 1;
+            end loop;
+            if Name_End > I then
+               declare
+                  Name   : constant String := S (I .. Name_End - 1);
+                  VStart : Natural := Name_End;
+               begin
+                  while VStart <= S'Last and then S (VStart) = ' ' loop
+                     VStart := VStart + 1;
+                  end loop;
+                  if VStart <= S'Last then
+                     begin
+                        Set_Param (Name, Integer'Value (S (VStart .. S'Last)));
+                     exception
+                        when Constraint_Error => null;
+                     end;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+      Ada.Text_IO.Close (F);
+      Rebuild_Material_PST;
+   exception
+      when Ada.IO_Exceptions.Name_Error =>
+         Ada.Text_IO.Put_Line ("warning: cannot open params file " & File_Name);
+   end Load_Params;
+
+   procedure Dump_Params is
+   begin
+      for Id in Param_Id loop
+         Ada.Text_IO.Put_Line
+           (Param_Id'Image (Id) & " " & Integer'Image (Params (Id)));
+      end loop;
+   end Dump_Params;
 
    -- Row of Square from the given side's own point of view (same convention
    -- as the PSTs).
@@ -351,40 +490,37 @@ package body BBChess.Eval is
    end Game_Phase;
 
    --------------------------
-   -- Positional constants --
+   -- Tunable parameters --
    --------------------------
 
-   Bishop_Pair_Opening : constant Score_Type := 20;
-   Bishop_Pair_Endgame : constant Score_Type := 45;
+   -- Every scalar evaluation constant is held in Params so that the
+   -- automatic tuner can adjust it at run time. The named constants below
+   -- are renames, so the rest of the evaluation is unchanged.
+   Bishop_Pair_Opening : Score_Type renames Params (P_Bishop_Pair_Op);
+   Bishop_Pair_Endgame : Score_Type renames Params (P_Bishop_Pair_Eg);
 
    -- Mobility: centipawns per attacked (reachable) square, per piece kind.
-   Mobility_N : constant Score_Type := 4;
-   Mobility_B : constant Score_Type := 4;
-   Mobility_R : constant Score_Type := 2;
-   Mobility_Q : constant Score_Type := 1;
+   Mobility_N : Score_Type renames Params (P_Mobility_N);
+   Mobility_B : Score_Type renames Params (P_Mobility_B);
+   Mobility_R : Score_Type renames Params (P_Mobility_R);
+   Mobility_Q : Score_Type renames Params (P_Mobility_Q);
 
-   Rook_On_7th_Opening : constant Score_Type := 15;
-   Rook_On_7th_Endgame : constant Score_Type := 35;
-   -- Extra bonus when the enemy king is still close to its back ranks.
-   Rook_On_7th_King    : constant Score_Type := 25;
+   Rook_On_7th_Opening : Score_Type renames Params (P_Rook7_Op);
+   Rook_On_7th_Endgame : Score_Type renames Params (P_Rook7_Eg);
+   Rook_On_7th_King    : Score_Type renames Params (P_Rook7_King);
 
-   -- Rook on an open (no pawn at all) / semi-open (no friendly pawn) file.
-   -- A rook is activated by the absence of *friendly* pawns in front of it;
-   -- a fully open file is worth a bit more than a semi-open one.
-   Rook_Open_File_Opening    : constant Score_Type := 22;
-   Rook_Open_File_Endgame    : constant Score_Type := 16;
-   Rook_Semi_Open_Opening    : constant Score_Type := 10;
-   Rook_Semi_Open_Endgame    : constant Score_Type := 6;
+   Rook_Open_File_Opening    : Score_Type renames Params (P_RookOpen_Op);
+   Rook_Open_File_Endgame    : Score_Type renames Params (P_RookOpen_Eg);
+   Rook_Semi_Open_Opening    : Score_Type renames Params (P_RookSemi_Op);
+   Rook_Semi_Open_Endgame    : Score_Type renames Params (P_RookSemi_Eg);
 
-   -- Two rooks defending each other (same file or rank, line clear).
-   Rook_Connected_Opening : constant Score_Type := 10;
-   Rook_Connected_Endgame : constant Score_Type := 14;
+   Rook_Connected_Opening : Score_Type renames Params (P_RookConn_Op);
+   Rook_Connected_Endgame : Score_Type renames Params (P_RookConn_Eg);
 
-   -- Pawn structure penalties (per offending pawn).
-   Doubled_Pawn_Opening : constant Score_Type := 8;
-   Doubled_Pawn_Endgame : constant Score_Type := 5;
-   Isolated_Pawn_Opening : constant Score_Type := 10;
-   Isolated_Pawn_Endgame : constant Score_Type := 12;
+   Doubled_Pawn_Opening : Score_Type renames Params (P_Doubled_Op);
+   Doubled_Pawn_Endgame : Score_Type renames Params (P_Doubled_Eg);
+   Isolated_Pawn_Opening : Score_Type renames Params (P_Isolated_Op);
+   Isolated_Pawn_Endgame : Score_Type renames Params (P_Isolated_Eg);
 
    -- Passed pawn bonus indexed by the pawn "own row" (0 = back rank).
    -- Row 0 and 7 are unreachable for a pawn, hence 0.
@@ -393,32 +529,24 @@ package body BBChess.Eval is
    Passed_Pawn_Endgame : constant array (Natural range 0 .. 7) of Score_Type :=
      (0, 12, 22, 38, 60, 90, 130, 0);
 
-   -- Extra bonus (fraction of the row bonus) for a passed pawn that is
-   -- defended by a friendly pawn ("protected" passed pawn).
-   Protected_Passed_Opening : constant Score_Type := 40;
-   Protected_Passed_Endgame : constant Score_Type := 50;
-   -- "Outside" passed pawn: far from the enemy king (useful to deflect it).
-   Outside_Passed_Opening    : constant Score_Type := 10;
-   Outside_Passed_Endgame    : constant Score_Type := 15;
-   -- Minimum file distance from the enemy king to count as "outside".
+   Protected_Passed_Opening : Score_Type renames Params (P_Protected_Op);
+   Protected_Passed_Endgame : Score_Type renames Params (P_Protected_Eg);
+   Outside_Passed_Opening    : Score_Type renames Params (P_Outside_Op);
+   Outside_Passed_Endgame    : Score_Type renames Params (P_Outside_Eg);
    Outside_Passed_Distance   : constant := 2;
 
    -- King safety.
-   Pawn_Shield_Row1      : constant Score_Type := 8;
-   Pawn_Shield_Row2      : constant Score_Type := 6;
-   Pawn_Shield_Row3      : constant Score_Type := 3;
-   Open_File_Near_King   : constant Score_Type := 10;
-   Pawn_Storm            : constant Score_Type := 3;
-   King_Attack_Knight    : constant Score_Type := 10;
-   King_Attack_Bishop    : constant Score_Type := 10;
-   King_Attack_Rook      : constant Score_Type := 16;
-   King_Attack_Queen     : constant Score_Type := 24;
-   -- Penalty when the king has left its back rank in the middlegame (it is
-   -- then much easier to expose to an attack).
-   Exposed_King          : constant Score_Type := 28;
+   Pawn_Shield_Row1      : Score_Type renames Params (P_Shield1);
+   Pawn_Shield_Row2      : Score_Type renames Params (P_Shield2);
+   Pawn_Shield_Row3      : Score_Type renames Params (P_Shield3);
+   Open_File_Near_King   : Score_Type renames Params (P_OpenFile);
+   Pawn_Storm            : Score_Type renames Params (P_Storm);
+   King_Attack_Knight    : Score_Type renames Params (P_Atk_N);
+   King_Attack_Bishop    : Score_Type renames Params (P_Atk_B);
+   King_Attack_Rook      : Score_Type renames Params (P_Atk_R);
+   King_Attack_Queen     : Score_Type renames Params (P_Atk_Q);
+   Exposed_King          : Score_Type renames Params (P_Exposed);
    King_Safety_Min_Phase : constant Natural := 20;
-   -- Below this phase, king safety is irrelevant (its weight is ~0 anyway)
-   -- and is not even computed, which keeps the endgame evaluation cheap.
 
    --------------------
    -- King safety --
@@ -808,12 +936,7 @@ package body BBChess.Eval is
 
 begin
    -- Precompute the flat material+PST table.
-   for P in Piece_Type loop
-      for S in Square_Type loop
-         Material_PST (P, S) :=
-           Piece_Value (Kind (P)) + PST (Kind (P), Color (P), S);
-      end loop;
-   end loop;
+   Rebuild_Material_PST;
 
    -- Precompute the king near/far attack zones.
    for S in Square_Type loop

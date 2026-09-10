@@ -49,6 +49,9 @@ use BBChess.Search;
 with BBChess.Notation;
 use BBChess.Notation;
 
+with BBChess.Eval;
+use BBChess.Eval;
+
 with BBChess.Self_Tests;
 
 procedure AdaChess_BB is
@@ -449,7 +452,77 @@ procedure AdaChess_BB is
          & Long_Float'Image (Nps / 1000.0) & " knps");
    end Run_Bench;
 
+   -------------------------
+   -- Eval dump (tuning) --
+   -------------------------
+
+   -- Read one position per line ("FEN" or "FEN;result") and print the
+   -- White-positive static evaluation, one integer per line. Used by the
+   -- automatic tuner.
+   procedure Run_Eval_Fens (File_Name : in String) is
+      F    : Ada.Text_IO.File_Type;
+      Line : String (1 .. 512);
+      Last : Natural;
+      Pos  : Position_Type;
+   begin
+      Ada.Text_IO.Open (F, Ada.Text_IO.In_File, File_Name);
+      while not Ada.Text_IO.End_Of_File (F) loop
+         Ada.Text_IO.Get_Line (F, Line, Last);
+         declare
+            S    : constant String := Line (1 .. Last);
+            Semi : Natural := 0;
+         begin
+            for I in S'Range loop
+               if S (I) = ';' then
+                  Semi := I;
+                  exit;
+               end if;
+            end loop;
+            declare
+               Fen : constant String :=
+                 (if Semi = 0 then S else S (S'First .. Semi - 1));
+            begin
+               if Fen'Length > 0 then
+                  begin
+                     Load (Pos, Fen);
+                     Ada.Text_IO.Put_Line (Integer'Image (Static (Pos)));
+                  exception
+                     when Constraint_Error =>
+                        Ada.Text_IO.Put_Line ("0");
+                  end;
+               end if;
+            end;
+         end;
+      end loop;
+      Ada.Text_IO.Close (F);
+   end Run_Eval_Fens;
+
 begin
+   -- Optional evaluation parameter file (applies to every mode).
+   for I in 1 .. Ada.Command_Line.Argument_Count loop
+      if Ada.Command_Line.Argument (I) = "--params"
+        and then I < Ada.Command_Line.Argument_Count
+      then
+         Load_Params (Ada.Command_Line.Argument (I + 1));
+      end if;
+   end loop;
+
+   -- Dump the current evaluation parameters.
+   if Ada.Command_Line.Argument_Count >= 1
+     and then Ada.Command_Line.Argument (1) = "--dump-params"
+   then
+      Dump_Params;
+      return;
+   end if;
+
+   -- Dump the static evaluation of every FEN of a file (tuning dataset).
+   if Ada.Command_Line.Argument_Count >= 2
+     and then Ada.Command_Line.Argument (1) = "--eval-fens"
+   then
+      Run_Eval_Fens (Ada.Command_Line.Argument (2));
+      return;
+   end if;
+
    -- Self test mode.
    if Ada.Command_Line.Argument_Count > 0
      and then Ada.Command_Line.Argument (1) = "--selftest"
