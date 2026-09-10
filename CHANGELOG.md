@@ -27,6 +27,12 @@
 - Buffer d'entrée porté à 8192 octets (les longues lignes `position ... moves`
   étaient tronquées).
 
+### Outillage
+- Constantes d'éval paramétrables (`--dump-params`, `--params`, `--eval-fens`).
+- `scripts/gen_dataset.py` et `scripts/tune.py` (tuner Texel). Expérience de
+  tuning non concluante sur petit dataset : paramètres par défaut conservés
+  (cf. `DEVELOPMENT.md` § 7sexies).
+
 ### Évaluation
 - Sécurité du roi renforcée (zone à distance 2, danger non linéaire, roi
   exposé) — cf. `DEVELOPMENT.md` § 7bis.

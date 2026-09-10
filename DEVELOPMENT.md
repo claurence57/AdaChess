@@ -429,7 +429,19 @@ Outillage (`scripts/`) :
   `python-chess` ;
 - `tune.py` : descente de coordonnées type **Texel** (minimise l'écart
   `sigmoid(K·eval/400)` vs résultat, `K = 1.13`), en pilotant le moteur par
-  `--eval-fens`/`--params`.
+  `--eval-fens`/`--params`. Un jeu de validation (1 position sur 5) filtre les
+  changements : un candidat n'est retenu que s'il améliore **train ET
+  validation**.
+
+**Résultat de l'expérience (négatif)** : sur un dataset de 240 parties
+d'auto-jeu à ouvertures aléatoires (5 801 positions), la descente fait baisser
+l'objectif (train 0,1025 → 0,0950 ; validation 0,1033 → 0,0951) mais les
+paramètres obtenus **régressent en parties réelles** (~−147 Elo en A/B contre
+les défauts). En ne gardant que les paramètres positionnels (matériel aux
+défauts), l'effet est ~neutre. Conclusion : à cette échelle, minimiser l'erreur
+d'éval sur des parties d'auto-jeu ne corrèle pas avec la force de jeu ; il
+faudrait un dataset bien plus grand/divers (ou une recherche de paramètres
+validée par SPRT). **Les valeurs par défaut sont conservées.**
 
 ## 8. État actuel & chantiers restants
 
