@@ -16,10 +16,10 @@
 --      its back ranks), stronger in the endgame;
 --    * rooks on open / semi-open files;
 --    * connected rooks (defending each other on the same file/rank);
---    * pawn structure: doubled and isolated pawns, passed pawns (no enemy
---      pawn in front on the same or adjacent files), with extra bonuses for
---      protected and outside passed pawns; all derived from bitboard file
---      masks;
+--    * pawn structure, evaluated in pure bitboard: doubled and isolated
+--      pawns (from per-file popcounts) and passed pawns (front span built by
+--      rank-wise propagation of the enemy pawns widened to their neighbouring
+--      files), with extra bonuses for protected and outside passed pawns;
 --    * king safety (pawn shelter, open files near the king, pawn storm,
 --      enemy attackers around the king) - opening/middlegame only;
 --    * king endgame activity (the base PST keeps the king at home in the
@@ -81,72 +81,90 @@ package body BBChess.Eval is
       7 => Bit (56) or Bit (57) or Bit (58) or Bit (59)
             or Bit (60) or Bit (61) or Bit (62) or Bit (63));
 
-   -- Squares strictly above (White's forward) / below a given rank.
-   type Rank_Span_Table is array (Natural range 0 .. 7) of Bitboard;
-   Above_Rank : constant Rank_Span_Table :=
-     (Rank_Mask (1) or Rank_Mask (2) or Rank_Mask (3) or Rank_Mask (4)
-        or Rank_Mask (5) or Rank_Mask (6) or Rank_Mask (7),
-      Rank_Mask (2) or Rank_Mask (3) or Rank_Mask (4) or Rank_Mask (5)
-        or Rank_Mask (6) or Rank_Mask (7),
-      Rank_Mask (3) or Rank_Mask (4) or Rank_Mask (5) or Rank_Mask (6)
-        or Rank_Mask (7),
-      Rank_Mask (4) or Rank_Mask (5) or Rank_Mask (6) or Rank_Mask (7),
-      Rank_Mask (5) or Rank_Mask (6) or Rank_Mask (7),
-      Rank_Mask (6) or Rank_Mask (7),
-      Rank_Mask (7),
-      0);
-   Below_Rank : constant Rank_Span_Table :=
-     (0,
-      Rank_Mask (0),
-      Rank_Mask (0) or Rank_Mask (1),
-      Rank_Mask (0) or Rank_Mask (1) or Rank_Mask (2),
-      Rank_Mask (0) or Rank_Mask (1) or Rank_Mask (2) or Rank_Mask (3),
-      Rank_Mask (0) or Rank_Mask (1) or Rank_Mask (2) or Rank_Mask (3)
-        or Rank_Mask (4),
-      Rank_Mask (0) or Rank_Mask (1) or Rank_Mask (2) or Rank_Mask (3)
-        or Rank_Mask (4) or Rank_Mask (5),
-      Rank_Mask (0) or Rank_Mask (1) or Rank_Mask (2) or Rank_Mask (3)
-        or Rank_Mask (4) or Rank_Mask (5) or Rank_Mask (6));
+   -- Pure-bitboard helpers: shifts by one file / one rank. Board layout:
+   -- square = Rank*8 + File, so +1 file = bit index +1, +1 rank = +8.
+   -- Masks keep the bits from wrapping around the board edges.
+   function East_1 (B : in Bitboard) return Bitboard is
+     ((B and not File_Mask (7)) * 2);
+   function West_1 (B : in Bitboard) return Bitboard is
+     ((B and not File_Mask (0)) / 2);
+   function North_1 (B : in Bitboard) return Bitboard is
+     ((B and not Rank_Mask (7)) * 256);
+   function South_1 (B : in Bitboard) return Bitboard is
+     (B / 256);
 
-   -- The three files that make up the "front" of a pawn on File.
-   function Front_Files (File : in Natural) return Bitboard is
-     (File_Mask (Natural'Max (0, File - 1))
-      or File_Mask (File)
-      or File_Mask (Natural'Min (7, File + 1)));
-
-   -- Pawns of Color that are passed: no enemy pawn on the same or adjacent
-   -- files in front of them (purely bitboard: mask + intersection, no loop).
-   function Passed_Pawns (Position : in Position_Type;
-                          Color    : in Color_Type) return Bitboard is
-      Own    : constant Bitboard := Position.Pieces (Make (Color, Pawn));
-      Enemy  : constant Bitboard :=
-        Position.Pieces (Make (Opposite (Color), Pawn));
-      Block  : Bitboard := 0;
-      Res    : Bitboard := 0;
-      B      : Bitboard := Own;
+   -- Squares that have an enemy pawn on the same or an adjacent file at any
+   -- rank strictly in front of them, from the point of view of a pawn of
+   -- Color. A White pawn is blocked by Black pawns standing north of it, so
+   -- the enemy pawns (widened to their neighbouring files) are propagated
+   -- south; symmetrically for Black. Pure bitboard, no per-pawn loop.
+   function Front_Blockers (Enemy   : in Bitboard;
+                            Color   : in Color_Type) return Bitboard is
+      Wide : Bitboard := Enemy or East_1 (Enemy) or West_1 (Enemy);
+      Res  : Bitboard := 0;
    begin
-      -- A pawn on a given file is blocked when an enemy pawn stands on one
-      -- of its front files at a rank strictly in front (above for White,
-      -- below for Black). Build, per occupied own pawn, the blocking mask.
-      while B /= 0 loop
-         declare
-            Sq    : constant Square_Type := Lowest_Bit (B);
-            R     : constant Natural := Rank_Of (Sq);
-            Front : Bitboard;
-         begin
-            if Color = White then
-               Front := Enemy and Above_Rank (R) and Front_Files (File_Of (Sq));
-            else
-               Front := Enemy and Below_Rank (R) and Front_Files (File_Of (Sq));
-            end if;
-            if Front = 0 then
-               Res := Res or Bit (Sq);
-            end if;
-         end;
-         B := B and (B - 1);
+      for Step in 1 .. 7 loop
+         if Color = White then
+            Wide := South_1 (Wide);
+         else
+            Wide := North_1 (Wide);
+         end if;
+         Res := Res or Wide;
       end loop;
       return Res;
+   end Front_Blockers;
+
+   -- Pawns of Color that are passed: no enemy pawn on the same or adjacent
+   -- files in front of them (pure bitboard front-span, no per-pawn loop).
+   function Passed_Pawns (Position : in Position_Type;
+                          Color    : in Color_Type) return Bitboard is
+      Own   : constant Bitboard := Position.Pieces (Make (Color, Pawn));
+      Enemy : constant Bitboard :=
+        Position.Pieces (Make (Opposite (Color), Pawn));
+   begin
+      return Own and not Front_Blockers (Enemy, Color);
    end Passed_Pawns;
+
+   -- True when a friendly pawn of Color defends Square. A pawn defends the
+   -- two squares diagonally in front of it, so the defenders of Square stand
+   -- one rank behind it on the adjacent files (Square - 9 / - 7 for White,
+   -- Square + 7 / + 9 for Black).
+   function Defended_By_Pawn (Position : in Position_Type;
+                              Color    : in Color_Type;
+                              Square   : in Square_Type) return Boolean is
+      Def1, Def2 : Integer;
+      F1, F2     : Integer;
+   begin
+      if Color = White then
+         Def1 := Integer (Square) - 9;
+         Def2 := Integer (Square) - 7;
+      else
+         Def1 := Integer (Square) + 7;
+         Def2 := Integer (Square) + 9;
+      end if;
+      if Def1 not in Square_Type then
+         return Def2 in Square_Type
+           and then (Position.Pieces (Make (Color, Pawn))
+                     and Bit (Square_Type (Def2))) /= 0;
+      end if;
+      F1 := Integer (File_Of (Square_Type (Def1)));
+      F2 := Integer (File_Of (Square_Type (Def2)));
+      -- Def1 / Def2 are on the adjacent files only when they did not wrap
+      -- around a rank edge: check the file differs by exactly 1.
+      if abs (F1 - Integer (File_Of (Square))) = 1 then
+         if (Position.Pieces (Make (Color, Pawn))
+             and Bit (Square_Type (Def1))) /= 0 then
+            return True;
+         end if;
+      end if;
+      if Def2 in Square_Type
+        and then abs (F2 - Integer (File_Of (Square))) = 1
+      then
+         return (Position.Pieces (Make (Color, Pawn))
+                 and Bit (Square_Type (Def2))) /= 0;
+      end if;
+      return False;
+   end Defended_By_Pawn;
 
    -- Rows: 0 = own back rank, 7 = just before the opponent's back rank.
    Pawn_PST : constant PST_Table :=
@@ -598,99 +616,82 @@ package body BBChess.Eval is
          end if;
       end;
 
-      -- Pawn structure, all bitboard-wise: doubled / isolated penalties
-      -- derived from per-file counts, and a passed-pawn bonus (with an
-      -- extra reward when a passed pawn is connected / supported).
+      -- Pawn structure, pure bitboard: per-file counts derived from masks
+      -- (doubled / isolated penalties), and a passed-pawn bonus read from
+      -- the front-span bitboard, with an extra reward when the passed pawn
+      -- is defended by a friendly pawn ("protected") or far from the enemy
+      -- king ("outside", good to deflect it in king-pawn endgames).
       declare
-         Counts  : array (0 .. 7) of Natural := (others => 0);
-         Passed  : Bitboard := Passed_Pawns (Position, Color);
-         B2      : Bitboard := Own_Pawns;
-      begin         -- Per-file counts of friendly pawns.
-         while B2 /= 0 loop
-            Counts (File_Of (Lowest_Bit (B2))) :=
-              Counts (File_Of (Lowest_Bit (B2))) + 1;
-            B2 := B2 and (B2 - 1);
-         end loop;
-
-         -- Doubled penalty (each pawn beyond the first on its file).
+         Passed : constant Bitboard := Passed_Pawns (Position, Color);
+         PB     : Bitboard;
+      begin
+         -- Doubled penalty and isolation, driven by per-file counts.
          for F in 0 .. 7 loop
-            if Counts (F) >= 2 then
-               Result := Result +
-                 (Opening => (-Doubled_Pawn_Opening)
-                    * Score_Type (Counts (F) - 1),
-                  End_Game => (-Doubled_Pawn_Endgame)
-                    * Score_Type (Counts (F) - 1));
-            end if;
-         end loop;
-
-         -- Isolated: no friendly pawn on an adjacent file.
-         for F in 0 .. 7 loop
-            if Counts (F) >= 1 then
-               declare
-                  Has_Neighbour : Boolean;
-               begin
-                  if F = 0 then
-                     Has_Neighbour := Counts (1) > 0;
-                  elsif F = 7 then
-                     Has_Neighbour := Counts (6) > 0;
-                  else
-                     Has_Neighbour := Counts (F - 1) > 0 or Counts (F + 1) > 0;
-                  end if;
-                  if not Has_Neighbour then
-                     Result := Result +
-                       (Opening => (-Isolated_Pawn_Opening)
-                          * Score_Type (Counts (F)),
-                        End_Game => (-Isolated_Pawn_Endgame)
-                          * Score_Type (Counts (F)));
-                  end if;
-               end;
-            end if;
-         end loop;
-
-         -- Passed pawns: iterate the bitboard, giving the row bonus and an
-         -- extra reward when the passed pawn is defended by a friendly pawn
-         -- ("protected") or far from the enemy king ("outside", good to
-         -- deflect it in king-pawn endgames).
-         declare
-            -- Squares defended by one of our pawns.
-            Defended : Bitboard := 0;
-         begin
-            B2 := Own_Pawns;
-            while B2 /= 0 loop
-               Defended := Defended or Pawn_Attacks (Color, Lowest_Bit (B2));
-               B2 := B2 and (B2 - 1);
-            end loop;
-
-            while Passed /= 0 loop
-               declare
-                  Sq       : constant Square_Type := Lowest_Bit (Passed);
-                  F        : constant Natural := File_Of (Sq);
-                  Row      : constant Natural := Own_Row (Color, Sq);
-                  Defended_Pawn : constant Boolean :=
-                    (Defended and Bit (Sq)) /= 0;
-                  Outside_Pawn  : constant Boolean :=
-                    abs (Integer (F) - Integer (File_Of (Enemy_King)))
-                    >= Outside_Passed_Distance;
-               begin
+            declare
+               Cnt : constant Natural :=
+                 Popcount (Own_Pawns and File_Mask (F));
+            begin
+               if Cnt >= 2 then
                   Result := Result +
-                    (Opening => Passed_Pawn_Opening (Row),
-                     End_Game => Passed_Pawn_Endgame (Row));
-                  if Defended_Pawn then
-                     Result := Result +
-                       (Opening => Passed_Pawn_Opening (Row)
-                          * Protected_Passed_Opening / 100,
-                        End_Game => Passed_Pawn_Endgame (Row)
-                          * Protected_Passed_Endgame / 100);
-                  end if;
-                  if Outside_Pawn then
-                     Result := Result +
-                       (Opening => Outside_Passed_Opening,
-                        End_Game => Outside_Passed_Endgame);
-                  end if;
-               end;
-               Passed := Passed and (Passed - 1);
-            end loop;
-         end;
+                    (Opening => (-Doubled_Pawn_Opening)
+                       * Score_Type (Cnt - 1),
+                     End_Game => (-Doubled_Pawn_Endgame)
+                       * Score_Type (Cnt - 1));
+               end if;
+
+               if Cnt >= 1 then
+                  declare
+                     Adj : Bitboard := 0;
+                  begin
+                     if F > 0 then
+                        Adj := Adj or File_Mask (F - 1);
+                     end if;
+                     if F < 7 then
+                        Adj := Adj or File_Mask (F + 1);
+                     end if;
+                     if (Own_Pawns and Adj) = 0 then
+                        Result := Result +
+                          (Opening => (-Isolated_Pawn_Opening)
+                             * Score_Type (Cnt),
+                           End_Game => (-Isolated_Pawn_Endgame)
+                             * Score_Type (Cnt));
+                     end if;
+                  end;
+               end if;
+            end;
+         end loop;
+
+         -- Passed pawns: iterate the front-span bitboard for the row bonus.
+         PB := Passed;
+         while PB /= 0 loop
+            declare
+               Sq      : constant Square_Type := Lowest_Bit (PB);
+               F       : constant Natural := File_Of (Sq);
+               Row     : constant Natural := Own_Row (Color, Sq);
+               Defended_Pawn : constant Boolean :=
+                 Defended_By_Pawn (Position, Color, Sq);
+               Outside_Pawn  : constant Boolean :=
+                 abs (Integer (F) - Integer (File_Of (Enemy_King)))
+                 >= Outside_Passed_Distance;
+            begin
+               Result := Result +
+                 (Opening => Passed_Pawn_Opening (Row),
+                  End_Game => Passed_Pawn_Endgame (Row));
+               if Defended_Pawn then
+                  Result := Result +
+                    (Opening => Passed_Pawn_Opening (Row)
+                       * Protected_Passed_Opening / 100,
+                     End_Game => Passed_Pawn_Endgame (Row)
+                       * Protected_Passed_Endgame / 100);
+               end if;
+               if Outside_Pawn then
+                  Result := Result +
+                    (Opening => Outside_Passed_Opening,
+                     End_Game => Outside_Passed_Endgame);
+               end if;
+            end;
+            PB := PB and (PB - 1);
+         end loop;
       end;
 
       -- King: endgame activity replaces the home-oriented PST.

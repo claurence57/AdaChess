@@ -212,13 +212,14 @@ de coût. Corrections :
   nouveau dans chaque `King_Safety`).
 - Case du roi adverse **hissée** hors de la boucle des tours (elle était
   re-dérivée par `Lowest_Bit` à chaque tour).
-- **Pions passés par bitboard** : fonction `Passed_Pawns` avec masques
-  pré-calculés `Above_Rank`/`Below_Rank` + `Front_Files` (3 colonnes), au lieu de
-  la double boucle alliés × ennemis.
-- **Doublés / isolés** dérivés de comptages par colonne (`File_Mask`) plutôt que
-  de listes de cases ; **pions passés liés** testés sur voisins bitboard.
-- Tables `Rank_Mask`, `Above_Rank`, `Below_Rank`, `Front_Files` pré-calculées en
-  tête de fichier.
+- **Pions passés par bitboard** : fonction `Passed_Pawns` par **front-span pur
+  bitboard** (propagation des pions ennemis élargis d'une colonne, rangée par
+  rangée — helpers `East_1/West_1/North_1/South_1`), sans boucle par-pion.
+- **Doublés / isolés** dérivés de comptages `Popcount` par colonne (`File_Mask`),
+  sans liste de cases ; un pion passé **protégé** est testé par `Defended_By_Pawn`
+  (présence d'un pion ami sur les cases de défense arrière), **éloigné** par la
+  distance en colonnes au roi ennemi.
+- Tables `Rank_Mask` et `File_Mask` pré-calculées en tête de fichier.
 
 Résultats mesurés contre MB, après les ajouts du chantier 3 complet (colonnes
 ouvertes, structure de pions, pions protégés/éloignés, tours connectées, tempo) :
@@ -227,12 +228,29 @@ ouvertes, structure de pions, pions protégés/éloignés, tours connectées, te
   temps long aussi. (Petits échantillons, à confirmer, mais la tendance est très
   nette.)
 
+La **réécriture bitboard de la structure de pions** (§ 5.5) a été validée par un
+A/B **référence (git `50c06fb`, version bouclée) vs nouvelle version** : 20 parties
+à 1 s+0,1 s, **NEW bat REF 10-3-7** (≈ +127 Elo) — aucun signe de régression et un
+léger gain, self-test vert.
+
 ## 6. État actuel & chantiers restants
 
 **Validations** : `./bin_bb/adachess_bb --selftest` passe (perft + roque + éval +
 recherche + **SEE**). Self-tests et perft ne doivent **jamais régresser**. Note :
 avec le **tempo**, `Evaluate` n'est plus exactement antisymétrique ; le test de
 symétrie porte sur `Static` (départ = 0, miroir ⇒ `-Static`).
+
+**Adversaire de référence des mini-matchs** : **GNU Chess** (`/usr/games/gnuchess`,
+moteur **UCI** ~2400-2500 Elo, bien plus fort que MB). Se joue via un wrapper car
+cutechess ne passe pas d'arguments dans `cmd` :
+```bash
+#!/bin/bash
+exec /usr/games/gnuchess -u "$@"
+```
+puis `cutechess-cli -engine name=GNU cmd=/tmp/opencode/gnuchess_uci.sh proto=uci
+dir=/tmp -engine name=BB cmd="$PWD/bin_bb/adachess_bb" proto=xboard dir="$PWD" ...`
+(le mode xboard de GNU Chess 6.2.7 est incomplet : il n'émet jamais
+`feature done=1`, d'où l'usage d'UCI).
 
 **Problèmes / chantiers restants (après les chantiers 2 & 3, cf. § 5.4 / § 5.5)**
 1. **Temps** : les forfaits sous cutechess sont corrigés (recherche interruptible) et
@@ -244,8 +262,8 @@ symétrie porte sur `Static` (départ = 0, miroir ⇒ `-Static`).
    direct » complet, **book d'ouvertures**, et l'usage du **SEE** pour trier plus
    finement la quiescence et les captures.
 3. **Évaluation** : le chantier 3 est complet (§ 5.5) — colonnes ouvertes, structure
-   de pions (doublés/isolés/passés protégés et éloignés), tours connectées, tempo,
-   accélérations bitboard. Reste un **tuning fin des constantes** (tête de
+   de pions (doublés/isolés/passés protégés et éloignés) en **pur bitboard**, tours
+   connectées, tempo. Reste un **tuning fin des constantes** (tête de
    `bbchess-eval.adb`) qui demanderait un tuner automatique (ex. texel / gradient
    descent), des **outposts** (cases fortes) pour C/F, puis l'évaluation
    **incrémentale** (#9, l'éval reste ~50 % du temps de recherche même optimisée).
@@ -255,9 +273,9 @@ symétrie porte sur `Static` (départ = 0, miroir ⇒ `-Static`).
 gprbuild -P adachess.gpr   -XMode=release    # MB
 gprbuild -P adachess_bb.gpr -XMode=release   # BB
 ./bin_bb/adachess_bb --selftest              # tests BB
-# Mini-match (cutechess-cli) :
+# Mini-match BB vs GNU Chess (UCI, wrapper requis) :
 cutechess-cli -engine name=BB cmd="$PWD/bin_bb/adachess_bb" proto=xboard dir="$PWD" \
-              -engine name=MB cmd="$PWD/adachess" proto=xboard dir="$PWD" \
+              -engine name=GNU cmd=/tmp/opencode/gnuchess_uci.sh proto=uci dir=/tmp \
               -each tc=20+1 -games 2 -maxmoves 80 -pgnout match.pgn
 ```
 
