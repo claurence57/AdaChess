@@ -752,28 +752,9 @@ package body BBChess.Eval is
       Phase  : constant Natural := Game_Phase (Position);
       Occ    : constant Bitboard := Occupancy (Position);
    begin
-      -- Material + piece-square tables (flat, both phases).
-      for Color in Color_Type loop
-         declare
-            Sign : constant Score_Type := (if Color = White then 1 else -1);
-         begin
-            for Kind in Kind_Type loop
-               declare
-                  Piece : constant Piece_Type := Make (Color, Kind);
-                  B     : Bitboard := Position.Pieces (Piece);
-               begin
-                  while B /= 0 loop
-                     declare
-                        Sq : constant Square_Type := Lowest_Bit (B);
-                     begin
-                        Result := Result + Sign * Material_PST (Piece, Sq);
-                     end;
-                     B := B and (B - 1);
-                  end loop;
-               end;
-            end loop;
-         end;
-      end loop;
+      -- Material + piece-square tables: maintained incrementally by
+      -- Make_Move / Unmake_Move (White-positive).
+      Result := Position.Material;
 
       -- Positional terms, tapered by the game phase.
       declare
@@ -790,6 +771,29 @@ package body BBChess.Eval is
 
       return Result;
    end Static;
+
+   function Material_PST_Value (Piece  : in Piece_Type;
+                                Square : in Square_Type) return Integer is
+   begin
+      return Material_PST (Piece, Square);
+   end Material_PST_Value;
+
+   function Compute_Material (Position : in Position_Type) return Integer is
+      Total : Integer := 0;
+   begin
+      for P in Piece_Type loop
+         declare
+            Sign : constant Integer := (if Color (P) = White then 1 else -1);
+            B    : Bitboard := Position.Pieces (P);
+         begin
+            while B /= 0 loop
+               Total := Total + Sign * Material_PST (P, Lowest_Bit (B));
+               B := B and (B - 1);
+            end loop;
+         end;
+      end loop;
+      return Total;
+   end Compute_Material;
 
    function Evaluate (Position : in Position_Type) return Score_Type is
    begin

@@ -11,8 +11,9 @@
 - Quiescence en **génération tactique** seule, `Is_Repetition` borné à la
   fenêtre réversible, statut d'échec mis en cache.
 - Éval : table plate matériel+PST, zones d'attaque du roi précalculées,
-  `Pin_Mask` par rayons/between.
-- Résultat : ~470 → ~2400 knps à profondeur 9 (×5,2), self-tests verts.
+  `Pin_Mask` par rayons/between, **matériel+PST incrémental** (`Position.Material`
+  maintenu par Make/Unmake).
+- Résultat : ~470 → ~2550 knps à profondeur 9 (×5,5), self-tests verts.
 
 ### Évaluation
 - Sécurité du roi renforcée (zone à distance 2, danger non linéaire, roi

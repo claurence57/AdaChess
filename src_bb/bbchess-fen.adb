@@ -5,6 +5,9 @@
 with BBChess.Hash;
 use BBChess.Hash;
 
+with BBChess.Eval;
+use BBChess.Eval;
+
 with BBChess.Movegen;
 use BBChess.Movegen;
 
@@ -197,6 +200,7 @@ package body BBChess.Fen is
 
       Position := Pos;
       Position.Key := Hash.Compute (Position);
+      Position.Material := Compute_Material (Position);
    end Load;
 
 end BBChess.Fen;

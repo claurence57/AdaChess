@@ -231,6 +231,10 @@ package body BBChess.Self_Tests is
                Bad := True;
                exit;
             end if;
+            if Compute_Material (P) /= P.Material then
+               Bad := True;
+               exit;
+            end if;
             Generate_Legal_Moves (P, Moves, Count);
             exit when Count = 0;
             Make_Move (P, Moves (1 + (Step * 7) mod Count), U);
@@ -305,6 +309,7 @@ package body BBChess.Self_Tests is
                   end;
                end loop;
             end loop;
+            M.Material := Compute_Material (M);
             Assert (Static (M) = -Static (P),
                     "eval not symmetric for FEN " & Fen);
          end Check_Symmetry;

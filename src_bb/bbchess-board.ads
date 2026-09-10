@@ -55,6 +55,7 @@ package BBChess.Board is
          Halfmove    : Natural := 0;
          Fullmove    : Positive := 1;
          Key         : Bitboard := 0;
+         Material    : Integer := 0;   -- White-positive material + PST
       end record;
 
    function Piece_Board (Position : in Position_Type; Piece : in Piece_Type)

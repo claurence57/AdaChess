@@ -336,7 +336,7 @@ Objectif : maximiser les nœuds/seconde pour gagner de la profondeur effective.
 Mesure via un harnais dédié `--bench [profondeur]` : 8 positions fixes
 (début, ouvertures, milieu, finale) cherchées à profondeur fixe, sortie
 `nœuds / temps / knps`. À profondeur 9, on est passé de **~470 knps** à
-**~2400 knps** (≈ **×5,2**), à compteurs de nœuds **identiques** (aucun
+**~2550 knps** (≈ **×5,5**), à compteurs de nœuds **identiques** (aucun
 changement de comportement de recherche).
 
 Gains, par ordre d'implémentation :
@@ -356,6 +356,14 @@ Gains, par ordre d'implémentation :
    dans `Put/Remove_Piece`) et détection de capture O(1) dans `Make_Move`.
 6. **`Pin_Mask`** par rayons/between (bitboards) au lieu d'un balayage case par
    case. → ~+12 %.
+7. **Évaluation incrémentale** : matériel + PST maintenus dans
+   `Position.Material` (initialisés par `Load`/`Start_Position`, mis à jour par
+   `Make_Move`/`Unmake_Move`) ; `Static` ne parcourt plus le plateau. Test croisé
+   en self-test (clé Zobrist **et** matériel = recompute). → ~+4 %.
+
+Note : un **hash de pions** (clé pions+rois, `Pawn_Key` incrémental) a été
+implémenté puis retiré : il n'apporte rien, la structure de pions étant déjà
+bon marché une fois `Popcount` en instruction matérielle.
 
 Pièges : un build `-pg`/gprof laisse des objets instrumentés ; gprbuild ne les
 recompile pas toujours au retour à la normale → **toujours `rm -rf obj_bb`**

@@ -36,4 +36,14 @@ package BBChess.Eval is
    -- antisymmetric under a rank flip + color swap that keeps the same side
    -- to move; the pure antisymmetry holds on Static.
 
+   function Material_PST_Value (Piece  : in Piece_Type;
+                                Square : in Square_Type) return Integer;
+   -- Material + piece-square value of one piece (from White's point of
+   -- view). Used by Make_Move to keep Position.Material up to date.
+
+   function Compute_Material (Position : in Position_Type) return Integer;
+   -- Full recompute of the White-positive material + PST total. Used to
+   -- initialize Position.Material after Load / Start_Position and by the
+   -- self test that checks the incremental update.
+
 end BBChess.Eval;

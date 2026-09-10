@@ -5,6 +5,9 @@
 with BBChess.Hash;
 use BBChess.Hash;
 
+with BBChess.Eval;
+use BBChess.Eval;
+
 package body BBChess.Moves is
 
    -- Castle-relevant squares.
@@ -68,8 +71,9 @@ package body BBChess.Moves is
                En_Passant      => Position.En_Passant,
                Castle          => Position.Castle,
                Halfmove        => Position.Halfmove,
-               Fullmove        => Position.Fullmove,
-               Key             => Position.Key);
+                Fullmove        => Position.Fullmove,
+                Key             => Position.Key,
+                Material        => Position.Material);
 
       -- Remove the moving piece from its origin square.
       Remove_Piece (Position, Move.Piece, Move.From);
@@ -223,6 +227,28 @@ package body BBChess.Moves is
             Position.Key := K;
          end;
       end if;
+
+      -- Incremental material + PST (White-positive). The delta mirrors the
+      -- piece removals/additions performed above.
+      declare
+         function Signed (P : in Piece_Type; S : in Square_Type)
+           return Integer is
+           (if Color (P) = White
+            then Material_PST_Value (P, S)
+            else -Material_PST_Value (P, S));
+         D : Integer := Signed (To_Board, Move.To)
+                            - Signed (Move.Piece, Move.From);
+      begin
+         if Undo.Has_Captured then
+            D := D - Signed (Undo.Captured, Undo.Captured_Square);
+         end if;
+         if Move.Flag in King_Side_Castle | Queen_Side_Castle then
+            D := D
+              + Signed (Make (Moving, Rook), Rook_To (Moving, Move.Flag))
+              - Signed (Make (Moving, Rook), Rook_From (Moving, Move.Flag));
+         end if;
+         Position.Material := Position.Material + D;
+      end;
    end Make_Move;
 
    ----------------
@@ -266,6 +292,7 @@ package body BBChess.Moves is
       Position.Fullmove   := Undo.Fullmove;
       Position.Side       := Moving;
       Position.Key        := Undo.Key;
+      Position.Material   := Undo.Material;
    end Unmake_Move;
 
    --------------------
@@ -305,6 +332,7 @@ package body BBChess.Moves is
 
       Pos.Castle := (others => (others => True));
       Pos.Key := Hash.Compute (Pos);
+      Pos.Material := Compute_Material (Pos);
       return Pos;
    end Start_Position;
 

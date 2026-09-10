@@ -46,6 +46,7 @@ package BBChess.Moves is
          Halfmove        : Natural := 0;
          Fullmove        : Positive := 1;
          Key             : Bitboard := 0;
+         Material        : Integer := 0;
       end record;
 
    procedure Make_Move
