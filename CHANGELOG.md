@@ -15,6 +15,12 @@
   maintenu par Make/Unmake).
 - Résultat : ~470 → ~2550 knps à profondeur 9 (×5,5), self-tests verts.
 
+### Génération de coups & table de transposition (M1/M2)
+- Tables `Between`/`Line`, pions générés par shifts groupés, **légalité
+  directe** (échecs/clouages/roi) sans make/unmake (hors en-passant).
+- Coups encodés en 32 bits, **TT à 2 voies avec aging**.
+- `--bench 9` ≈ **2,8 M knps** ; perft exact (KiwiPete d1-d3), A/B sans régression.
+
 ### Évaluation
 - Sécurité du roi renforcée (zone à distance 2, danger non linéaire, roi
   exposé) — cf. `DEVELOPMENT.md` § 7bis.

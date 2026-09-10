@@ -369,6 +369,28 @@ Pièges : un build `-pg`/gprof laisse des objets instrumentés ; gprbuild ne les
 recompile pas toujours au retour à la normale → **toujours `rm -rf obj_bb`**
 après un profil, sinon les mesures sont faussées d'un facteur ~3.
 
+## 7quater. Movegen légal direct & table de transposition (chantiers M1/M2)
+
+**M1 — Génération de coups** (`bbchess-movegen.adb`, `bbchess-attacks.adb`) :
+- tables `Between[64][64]` et `Line[64][64]` (élaboration), `File_A_BB`/`File_H_BB` ;
+- `Pin_Mask` réécrit via `Between` ;
+- **génération groupée des pions** par shifts (poussées, doubles, captures,
+  promotions) au lieu d'une boucle par pion ;
+- **légalité directe** : `Checkers` (masque d'échec), masque de résolution
+  (capture du donneur ∪ interposition), restriction des pièces clouées à
+  `Line[roi][pièce]`, sécurité du roi via `Is_Attacked` avec la case du roi
+  retirée de l'occupancy. **Plus aucun make/unmake** dans la movegen, sauf
+  l'en-passant (cas rare, testé par make/unmake pour rester correct).
+
+**M2 — TT** (`bbchess-moves.adb`, `bbchess-search.adb`) :
+- coups encodés en **32 bits** (`Pack_Move`/`Unpack_Move`) pour le stockage TT ;
+- **TT à 2 voies** (bucket = index pair) avec **aging** par génération de
+  recherche et remplacement *depth-preferred*.
+
+**Résultat** : `--bench 9` ≈ **2,8 M knps** (contre ~2,55 M avant M1), self-tests
+verts (perft exact, dont KiwiPete d1-d3, tests `Between`/`Line`, round-trip du
+packing). A/B vs `bb-1.0` : **REF 1-11-8 NEW** (M2), aucune régression.
+
 ## 8. État actuel & chantiers restants
 
 **Validations** : `./bin_bb/adachess_bb --selftest` passe (perft + roque + éval +
