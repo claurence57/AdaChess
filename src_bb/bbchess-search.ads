@@ -41,6 +41,10 @@ package BBChess.Search is
    -- commands): when on, each completed iterative-deepening iteration
    -- prints a line "depth score time nodes bestmove".
 
+   procedure Set_Threads (N : in Natural);
+   -- Number of parallel search threads (Lazy SMP). 1 = single threaded.
+   -- The transposition table is shared; the heuristics are per thread.
+
    function Best_Move (Position : in Position_Type; Depth : in Natural)
      return Move_Type;
    -- Best move found by a fixed-depth iterative search from Position.

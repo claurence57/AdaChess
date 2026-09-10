@@ -2,9 +2,9 @@
 --  AdaChess-BB : attack tables (body)
 --
 --  Leaper tables are computed with simple rank/file steps. Sliding attacks
---  use "fancy magic bitboards": for each square a magic number is searched
---  so that (occupancy * magic) >> shift yields a collision-free index over
---  every relevant occupancy of that square.
+--  use a BMI2 PEXT lookup: for each square a relevant-occupancy mask is
+--  stored and (occupancy PEXT mask) directly indexes the precomputed attack
+--  table (a bijection on the subsets of the mask, so no magic search).
 --
 
 package body BBChess.Attacks is
@@ -43,6 +43,10 @@ package body BBChess.Attacks is
 
    function Square_Of (F, R : in Integer) return Square_Type is
      (Square_Type (R * 8 + F));
+
+   -- Parallel bit extract (BMI2), provided by bbchess-bits.c.
+   function Pext (X : in Bitboard; Mask : in Bitboard) return Bitboard
+     with Import, Convention => C, External_Name => "bb_pext";
 
    -- Bitboard of the sliding attacks from From, considering Occupancy.
    function Sliding_Attacks
@@ -97,38 +101,6 @@ package body BBChess.Attacks is
       return Result;
    end Slider_Mask;
 
-   -- Right shift on the modular 64-bit type (division by a power of two).
-   function Shift_Right (Value : in Bitboard; Amount : in Natural) return Bitboard is
-     (Value / 2 ** Amount);
-
-   ----------
-   -- PRNG --
-   ----------
-
-   -- Xorshift64*, deterministic seed.
-   Rand_State : Bitboard := 16#9E3779B97F4A7C15#;
-
-   function Next_Random return Bitboard is
-   begin
-      Rand_State := Rand_State xor Shift_Right (Rand_State, 12);
-      Rand_State := Rand_State xor (Rand_State * 2 ** 25);
-      Rand_State := Rand_State xor Shift_Right (Rand_State, 27);
-      return Rand_State * 16#2545F4914F6CDD1D#;
-   end Next_Random;
-
-   -------------------
-   -- Magic helpers --
-   -------------------
-
-   function Magic_Index
-     (Occupancy : in Bitboard;
-      Magic     : in Bitboard;
-      Shift     : in Natural) return Natural
-   is
-   begin
-      return Natural (Shift_Right (Occupancy * Magic, Shift));
-   end Magic_Index;
-
    -------------
    -- Leapers --
    -------------
@@ -151,101 +123,35 @@ package body BBChess.Attacks is
       Result := Acc;
    end Build_Leaper;
 
-   -----------------
-   -- Magic build --
-   -----------------
+   ---------------------
+   -- PEXT table build --
+   ---------------------
 
-   procedure Build_Rook_Magic (Square : in Square_Type) is
-      Mask  : constant Bitboard := Slider_Mask (Square, Rook_Deltas);
-      Shift : constant Natural := 64 - Popcount (Mask);
-      Found : Boolean := False;
-      Magic : Bitboard;
-      Used  : array (0 .. Max_Rook_Index) of Boolean := (others => False);
+   procedure Build_Rook_Table (Square : in Square_Type) is
+      Mask : constant Bitboard := Slider_Mask (Square, Rook_Deltas);
+      Sub  : Bitboard := Mask;
    begin
-      for Attempt in 1 .. 5_000_000 loop
-         Magic := Next_Random and Next_Random and Next_Random;
-         if Magic = 0 then
-            Magic := 1;
-         end if;
-         Used  := (others => False);
-         Found := True;
-
-         declare
-            Sub : Bitboard := Mask;
-         begin
-            loop
-               declare
-                  Idx : constant Natural := Magic_Index (Sub, Magic, Shift);
-               begin
-                  if Used (Idx) then
-                     Found := False;
-                     exit;
-                  end if;
-                  Used (Idx) := True;
-                  Rook_Attack_Table (Square, Idx) :=
-                    Sliding_Attacks (Square, Sub, Rook_Deltas);
-               end;
-               exit when Sub = 0;
-               Sub := (Sub - 1) and Mask;
-            end loop;
-         end;
-
-         exit when Found;
+      Rook_Mask (Square) := Mask;
+      loop
+         Rook_Attack_Table (Square, Natural (Pext (Sub, Mask))) :=
+           Sliding_Attacks (Square, Sub, Rook_Deltas);
+         exit when Sub = 0;
+         Sub := (Sub - 1) and Mask;
       end loop;
+   end Build_Rook_Table;
 
-      if not Found then
-         raise Program_Error with "Rook magic search failed on square " &
-           Square_Type'Image (Square);
-      end if;
-
-      Rook_Magic_Data (Square) := (Magic => Magic, Shift => Shift, Mask => Mask);
-   end Build_Rook_Magic;
-
-   procedure Build_Bishop_Magic (Square : in Square_Type) is
-      Mask  : constant Bitboard := Slider_Mask (Square, Bishop_Deltas);
-      Shift : constant Natural := 64 - Popcount (Mask);
-      Found : Boolean := False;
-      Magic : Bitboard;
-      Used  : array (0 .. Max_Bishop_Index) of Boolean := (others => False);
+   procedure Build_Bishop_Table (Square : in Square_Type) is
+      Mask : constant Bitboard := Slider_Mask (Square, Bishop_Deltas);
+      Sub  : Bitboard := Mask;
    begin
-      for Attempt in 1 .. 5_000_000 loop
-         Magic := Next_Random and Next_Random and Next_Random;
-         if Magic = 0 then
-            Magic := 1;
-         end if;
-         Used  := (others => False);
-         Found := True;
-
-         declare
-            Sub : Bitboard := Mask;
-         begin
-            loop
-               declare
-                  Idx : constant Natural := Magic_Index (Sub, Magic, Shift);
-               begin
-                  if Used (Idx) then
-                     Found := False;
-                     exit;
-                  end if;
-                  Used (Idx) := True;
-                  Bishop_Attack_Table (Square, Idx) :=
-                    Sliding_Attacks (Square, Sub, Bishop_Deltas);
-               end;
-               exit when Sub = 0;
-               Sub := (Sub - 1) and Mask;
-            end loop;
-         end;
-
-         exit when Found;
+      Bishop_Mask (Square) := Mask;
+      loop
+         Bishop_Attack_Table (Square, Natural (Pext (Sub, Mask))) :=
+           Sliding_Attacks (Square, Sub, Bishop_Deltas);
+         exit when Sub = 0;
+         Sub := (Sub - 1) and Mask;
       end loop;
-
-      if not Found then
-         raise Program_Error with "Bishop magic search failed on square " &
-           Square_Type'Image (Square);
-      end if;
-
-      Bishop_Magic_Data (Square) := (Magic => Magic, Shift => Shift, Mask => Mask);
-   end Build_Bishop_Magic;
+   end Build_Bishop_Table;
 
    --------------------
    -- Public queries --
@@ -253,20 +159,16 @@ package body BBChess.Attacks is
 
    function Bishop_Attacks (Square : in Square_Type; Occupancy : in Bitboard)
      return Bitboard is
-      Data : Magic_Data_Type renames Bishop_Magic_Data (Square);
-      Idx  : constant Natural :=
-        Magic_Index (Occupancy and Data.Mask, Data.Magic, Data.Shift);
    begin
-      return Bishop_Attack_Table (Square, Idx);
+      return Bishop_Attack_Table
+        (Square, Natural (Pext (Occupancy, Bishop_Mask (Square))));
    end Bishop_Attacks;
 
    function Rook_Attacks (Square : in Square_Type; Occupancy : in Bitboard)
      return Bitboard is
-      Data : Magic_Data_Type renames Rook_Magic_Data (Square);
-      Idx  : constant Natural :=
-        Magic_Index (Occupancy and Data.Mask, Data.Magic, Data.Shift);
    begin
-      return Rook_Attack_Table (Square, Idx);
+      return Rook_Attack_Table
+        (Square, Natural (Pext (Occupancy, Rook_Mask (Square))));
    end Rook_Attacks;
 
    function Queen_Attacks (Square : in Square_Type; Occupancy : in Bitboard)
@@ -276,6 +178,12 @@ package body BBChess.Attacks is
    end Queen_Attacks;
 
 begin
+   -- Sliding tables (no search: PEXT indexes the subsets directly).
+   for Square in Square_Type loop
+      Build_Rook_Table (Square);
+      Build_Bishop_Table (Square);
+   end loop;
+
    -- Leaper tables.
    for Square in Square_Type loop
       Build_Leaper (Knight_Attacks (Square), Square, Knight_Deltas);
@@ -301,12 +209,6 @@ begin
          Pawn_Attacks (White, Square) := White_Pawn_Acc;
          Pawn_Attacks (Black, Square) := Black_Pawn_Acc;
       end;
-   end loop;
-
-   -- Sliding magics.
-   for Square in Square_Type loop
-      Build_Rook_Magic (Square);
-      Build_Bishop_Magic (Square);
    end loop;
 
    -- File masks.

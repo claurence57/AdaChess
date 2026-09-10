@@ -507,6 +507,19 @@ begin
       end if;
    end loop;
 
+   -- Optional number of search threads (Lazy SMP).
+   for I in 1 .. Ada.Command_Line.Argument_Count loop
+      if Ada.Command_Line.Argument (I) = "--threads"
+        and then I < Ada.Command_Line.Argument_Count
+      then
+         begin
+            Set_Threads (Natural'Value (Ada.Command_Line.Argument (I + 1)));
+         exception
+            when Constraint_Error => Set_Threads (1);
+         end;
+      end if;
+   end loop;
+
    -- Dump the current evaluation parameters.
    if Ada.Command_Line.Argument_Count >= 1
      and then Ada.Command_Line.Argument (1) = "--dump-params"
@@ -586,7 +599,7 @@ begin
              Ada.Text_IO.Put_Line
                ("option name Hash type spin default 64 min 1 max 1024");
              Ada.Text_IO.Put_Line
-               ("option name Threads type spin default 1 min 1 max 1");
+               ("option name Threads type spin default 1 min 1 max 16");
              Ada.Text_IO.Put_Line ("uciok");
              Ada.Text_IO.Flush;
 
@@ -611,11 +624,14 @@ begin
              null;
 
           elsif Cmd = "setoption" and then UCI_Mode then
-             if Token (Par, 1) = "name"
-               and then Token (Par, 2) = "Clear"
-               and then Token (Par, 3) = "Hash"
-             then
-                Reset_Search;
+             if Token (Par, 1) = "name" then
+                if Token (Par, 2) = "Clear" and then Token (Par, 3) = "Hash" then
+                   Reset_Search;
+                elsif Token (Par, 2) = "Threads"
+                  and then Token (Par, 3) = "value"
+                then
+                   Set_Threads (Parse_Natural (Token (Par, 4), 1));
+                end if;
              end if;
 
           elsif Cmd = "protover" then

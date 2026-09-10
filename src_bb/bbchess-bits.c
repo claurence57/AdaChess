@@ -8,6 +8,7 @@
  */
 
 #include <stdint.h>
+#include <immintrin.h>
 
 int bb_popcountll (uint64_t x) {
    return __builtin_popcountll (x);
@@ -15,4 +16,9 @@ int bb_popcountll (uint64_t x) {
 
 int bb_ctzll (uint64_t x) {
    return __builtin_ctzll (x);
+}
+
+/* Parallel bit extract (BMI2), used by the sliding-attack lookup. */
+uint64_t bb_pext (uint64_t x, uint64_t mask) {
+   return _pext_u64 (x, mask);
 }

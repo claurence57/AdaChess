@@ -59,15 +59,8 @@ private
      array (Square_Type, Natural range 0 .. Max_Bishop_Index) of Bitboard;
    Bishop_Attack_Table : Bishop_Attack_Table_Type := (others => (others => 0));
 
-   type Magic_Data_Type is
-      record
-         Magic : Bitboard := 0;
-         Shift : Natural := 64;
-         Mask  : Bitboard := 0;
-      end record;
-
-   type Magic_Data_Array is array (Square_Type) of Magic_Data_Type;
-   Rook_Magic_Data   : Magic_Data_Array;
-   Bishop_Magic_Data : Magic_Data_Array;
+   -- Relevant-occupancy masks for the PEXT-based sliding lookup.
+   Rook_Mask   : array (Square_Type) of Bitboard := (others => 0);
+   Bishop_Mask : array (Square_Type) of Bitboard := (others => 0);
 
 end BBChess.Attacks;

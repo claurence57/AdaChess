@@ -2,11 +2,16 @@
 --  AdaChess-BB : alpha-beta search (body)
 --
 --  Iterative deepening with a transposition table, PVS at the root and at
---  every node, move ordering (hash move, MVV-LVA captures, killers), a
---  light LMR, null-move pruning and reverse futility pruning, plus a
+--  every node, move ordering (hash move, MVV-LVA captures, killers, history),
+--  a light LMR, null-move pruning and reverse futility pruning, plus a
 --  bounded quiescence search on tactical moves. The search is interruptible
 --  (a deadline is polled inside the recursion), which bounds the worst-case
 --  duration of a move.
+--
+--  Lazy SMP: the transposition table is shared between the search threads
+--  while the move-ordering heuristics (killers, history), the search path and
+--  the node/time counters live in a per-thread Search_Context. Threads are
+--  Ada tasks; the primary thread (1) produces the reported result.
 --
 
 with Ada.Real_Time;
@@ -28,61 +33,15 @@ use BBChess.Notation;
 
 package body BBChess.Search is
 
-   -- Raised (from Poll_Time) when the per-move time budget is exhausted
-   -- while the search is still running. Best_Move (the timed variant)
-   -- catches it and falls back to the last fully completed iteration.
+   -- Raised (from Poll_Time) when the per-move time budget is exhausted or
+   -- another thread asked the search to stop. The iterative loop catches it
+   -- and falls back to the last fully completed iteration.
    Search_Interrupted : exception;
 
-   -- Deadline shared between the iterative loop and the recursive search.
-   -- A deadline is armed only for the timed Best_Move; the fixed-depth
-   -- Best_Move (analysis / self tests) runs without any limit.
-   Check_Interval   : constant := 1024;
-   Nodes_Count      : Natural := 0;
-   Next_Checkpoint  : Natural := Check_Interval;
-   Time_Limit_Armed : Boolean := False;
-   Start_Time       : Time;
-   Time_Budget      : Duration := 0.0;
-
-   procedure Arm_Time_Limit (Budget : in Duration) is
-   begin
-      Time_Limit_Armed := True;
-      Time_Budget      := Budget;
-      Start_Time       := Clock;
-      Nodes_Count      := 0;
-      Next_Checkpoint  := Check_Interval;
-   end Arm_Time_Limit;
-
-   procedure Disarm_Time_Limit is
-   begin
-      Time_Limit_Armed := False;
-   end Disarm_Time_Limit;
-
-   function Nodes_Searched return Natural is
-   begin
-      return Nodes_Count;
-   end Nodes_Searched;
-
-   procedure Reset_Nodes is
-   begin
-      Nodes_Count := 0;
-      Next_Checkpoint := Check_Interval;
-   end Reset_Nodes;
-
-   -- Called at every search node. Checking the clock only every
-   -- Check_Interval nodes keeps the overhead negligible while still
-   -- bounding the overshoot to about one interval worth of nodes.
-   procedure Poll_Time is
-   begin
-      Nodes_Count := Nodes_Count + 1;
-      if Nodes_Count >= Next_Checkpoint then
-         Next_Checkpoint := Nodes_Count + Check_Interval;
-         if Time_Limit_Armed
-           and then To_Duration (Clock - Start_Time) >= Time_Budget
-         then
-            raise Search_Interrupted;
-         end if;
-      end if;
-   end Poll_Time;
+   -- Checking the clock only every Check_Interval nodes keeps the overhead
+   -- negligible while still bounding the overshoot.
+   Check_Interval : constant := 1024;
+   Max_Ply        : constant := 128;
 
    ---------------
    -- TT helpers --
@@ -139,6 +98,8 @@ package body BBChess.Search is
    -- Store a node. Mate scores are normalized by the distance to the root
    -- so they stay comparable across different depths. The two-way bucket
    -- keeps the deeper of the two entries and replaces stale ones first.
+   -- Under Lazy SMP the table is written without locking: races are benign
+   -- (a torn entry simply fails the key test on read).
    procedure Store (Position : in Position_Type;
                     Depth     : in Natural;
                     Bound     : in Bound_Type;
@@ -198,6 +159,85 @@ package body BBChess.Search is
       end if;
    end Store;
 
+   ---------------------
+   -- Search context --
+   ---------------------
+
+   type Killer_Array is array (1 .. 2, 0 .. Max_Ply) of Move_Type;
+   type History_Array is
+     array (Color_Type, Square_Type, Square_Type) of Score_Type;
+   type Path_Array is array (0 .. Max_Ply) of Bitboard;
+
+   type Search_Context is
+      record
+         Killers          : Killer_Array := (others => (others => Empty_Move));
+         History          : History_Array := (others => (others => (others => 0)));
+         Search_Path      : Path_Array := (others => 0);
+         Game_Keys        : Game_Key_Array := (others => 0);
+         Game_Key_Count   : Natural := 0;
+         Nodes_Count      : Natural := 0;
+         Next_Checkpoint  : Natural := Check_Interval;
+         Time_Limit_Armed : Boolean := False;
+         Start_Time       : Time := Clock;
+         Time_Budget      : Duration := 0.0;
+      end record;
+   type Context_Access is access all Search_Context;
+
+   -- Keys of the game so far, copied into each thread's context.
+   Init_Game_Keys  : Game_Key_Array := (others => 0);
+   Init_Game_Key_Count : Natural := 0;
+
+   -- Set by the primary thread to stop the helpers promptly.
+   Stop_Search : Boolean := False;
+   pragma Atomic (Stop_Search);
+
+   procedure Set_Game_History (Keys  : in Game_Key_Array;
+                               Count : in Natural) is
+   begin
+      if Count > Max_Game_Keys then
+         Init_Game_Key_Count := Max_Game_Keys;
+      else
+         Init_Game_Key_Count := Count;
+      end if;
+      for I in 0 .. Init_Game_Key_Count - 1 loop
+         Init_Game_Keys (I) := Keys (I);
+      end loop;
+   end Set_Game_History;
+
+   procedure Init_Context (Ctx    : in Context_Access;
+                           Arm    : in Boolean;
+                           Budget : in Duration) is
+   begin
+      Ctx.Killers := (others => (others => Empty_Move));
+      Ctx.History := (others => (others => (others => 0)));
+      Ctx.Search_Path := (others => 0);
+      Ctx.Game_Key_Count := Init_Game_Key_Count;
+      for I in 0 .. Init_Game_Key_Count - 1 loop
+         Ctx.Game_Keys (I) := Init_Game_Keys (I);
+      end loop;
+      Ctx.Nodes_Count := 0;
+      Ctx.Next_Checkpoint := Check_Interval;
+      Ctx.Time_Limit_Armed := Arm;
+      Ctx.Time_Budget := Budget;
+      Ctx.Start_Time := Clock;
+   end Init_Context;
+
+   procedure Poll_Time (Ctx : in Context_Access) is
+   begin
+      Ctx.Nodes_Count := Ctx.Nodes_Count + 1;
+      if Ctx.Nodes_Count >= Ctx.Next_Checkpoint then
+         Ctx.Next_Checkpoint := Ctx.Nodes_Count + Check_Interval;
+         if Stop_Search then
+            raise Search_Interrupted;
+         end if;
+         if Ctx.Time_Limit_Armed
+           and then To_Duration (Clock - Ctx.Start_Time) >= Ctx.Time_Budget
+         then
+            raise Search_Interrupted;
+         end if;
+      end if;
+   end Poll_Time;
+
    -------------------------------
    -- Move ordering helpers --
    -------------------------------
@@ -215,10 +255,6 @@ package body BBChess.Search is
       end case;
    end Kind_Value;
 
-   ---------------
-   -- Capture ? --
-   ---------------
-
    function Is_Tactical (Position : in Position_Type; Move : in Move_Type)
      return Boolean is
    begin
@@ -228,28 +264,7 @@ package body BBChess.Search is
       return (Color_Board (Position, Opposite (Position.Side)) and Bit (Move.To)) /= 0;
    end Is_Tactical;
 
-   -- Killers for the current search (cleared between moves).
-   Max_Ply : constant := 128;
-   Killers : array (1 .. 2, 0 .. Max_Ply) of Move_Type :=
-     (others => (others => Empty_Move));
-
-   procedure Reset_Killers is
-   begin
-      Killers := (others => (others => Empty_Move));
-   end Reset_Killers;
-
-   -- History heuristic: a quiet move that repeatedly refutes (beta cutoffs)
-   -- at the same from/to square is tried earlier in later positions. Kept
-   -- per side (moves are relative to the side to move) and bounded so that
-   -- it always ranks below the killers in the ordering.
    History_Max : constant Score_Type := 850_000;
-   History     : array (Color_Type, Square_Type, Square_Type) of Score_Type :=
-     (others => (others => (others => 0)));
-
-   procedure Reset_History is
-   begin
-      History := (others => (others => (others => 0)));
-   end Reset_History;
 
    -- History bonus of a quiet move that produced a beta cutoff at Depth.
    function History_Bonus (Depth : in Natural) return Score_Type is
@@ -261,41 +276,72 @@ package body BBChess.Search is
       return B;
    end History_Bonus;
 
-   procedure Bump_History (Side       : in Color_Type;
+   procedure Bump_History (Ctx        : in Context_Access;
+                           Side       : in Color_Type;
                            From, To   : in Square_Type;
                            Bonus      : in Score_Type) is
    begin
-      if History (Side, From, To) <= History_Max - Bonus then
-         History (Side, From, To) := History (Side, From, To) + Bonus;
+      if Ctx.History (Side, From, To) <= History_Max - Bonus then
+         Ctx.History (Side, From, To) := Ctx.History (Side, From, To) + Bonus;
       end if;
    end Bump_History;
 
-   -- Keys of the positions of the current game (including the current one),
-   -- for the threefold-repetition detection, plus the key of every node on
-   -- the current search path (indexed by Ply). A position already seen twice
-   -- on this reversible part of the line is a draw.
-   Game_Keys      : Game_Key_Array := (others => 0);
-   Game_Key_Count : Natural := 0;
-   Search_Path    : array (0 .. Max_Ply) of Bitboard := (others => 0);
-
-   procedure Set_Game_History (Keys  : in Game_Key_Array;
-                               Count : in Natural) is
+   -- Kind of the piece captured by Move (pawns for en-passant; the moving
+   -- piece itself when Move is not a capture - only used for ordering).
+   function Captured_Kind (Position : in Position_Type; Move : in Move_Type)
+     return Kind_Type is
+      P : Piece_Type;
    begin
-      if Count > Max_Game_Keys then
-         Game_Key_Count := Max_Game_Keys;
-      else
-         Game_Key_Count := Count;
+      if Move.Flag = En_Passant then
+         return Pawn;
       end if;
-      for I in 0 .. Game_Key_Count - 1 loop
-         Game_Keys (I) := Keys (I);
-      end loop;
-   end Set_Game_History;
+      if Piece_At (Position, Move.To, P) then
+         return Kind (P);
+      end if;
+      return Pawn;
+   end Captured_Kind;
 
-   -- XBoard thinking output ("post"/"nopost"). When enabled, the timed
-   -- search prints one line per completed iteration:
+   -- Move ordering score: hash move first, then captures (MVV-LVA), then
+   -- promotions, then the killers, then quiet moves ordered by the history
+   -- heuristic (moves that already produced beta cutoffs elsewhere).
+   function Order (Ctx        : in Context_Access;
+                   Position   : in Position_Type;
+                   Move       : in Move_Type;
+                   Hash_Move  : in Move_Type;
+                   Ply        : in Natural) return Score_Type is
+   begin
+      if Move = Hash_Move then
+         return 100_000_000;
+      end if;
+
+      if Move.Flag = Promotion then
+         return 50_000_000 + Kind_Value (Kind (Move.Promotion));
+      end if;
+
+      if Is_Tactical (Position, Move) then
+         declare
+            Victim   : constant Score_Type :=
+              Kind_Value (Captured_Kind (Position, Move));
+            Attacker : constant Score_Type := Kind_Value (Kind (Move.Piece));
+         begin
+            return 2_000_000 + Victim * 16 - Attacker;
+         end;
+      end if;
+
+      -- Quiet move.
+      if Ply <= Max_Ply then
+         if Move = Ctx.Killers (1, Ply) then
+            return 1_000_000;
+         elsif Move = Ctx.Killers (2, Ply) then
+            return 900_000;
+         end if;
+      end if;
+      return Ctx.History (Color (Move.Piece), Move.From, Move.To);
+   end Order;
+
+   -- XBoard thinking output ("post"/"nopost"). When enabled, the primary
+   -- thread prints one line per completed iteration:
    --    depth score time nodes bestmove
-   -- (score in centipawns from the side to move; mate as 100000 - plies;
-   -- time in centiseconds; bestmove in coordinate notation).
    Post_Output : Boolean := False;
 
    procedure Set_Post (On : in Boolean) is
@@ -303,7 +349,6 @@ package body BBChess.Search is
       Post_Output := On;
    end Set_Post;
 
-   -- Report one completed iteration in XBoard thinking format.
    procedure Report_Iteration (Depth      : in Natural;
                                Score      : in Score_Type;
                                Elapsed    : in Duration;
@@ -341,23 +386,23 @@ package body BBChess.Search is
    -- occurrences are looked up in the game history and among the ancestors
    -- of the current node (plies 1 .. Ply-1, the root being the last game
    -- key). Ply is the depth of the node below the search root.
-   function Is_Repetition (Position : in Position_Type;
-                           Ply       : in Natural) return Boolean
+   function Is_Repetition (Ctx      : in Context_Access;
+                           Position : in Position_Type;
+                           Ply      : in Natural) return Boolean
    is
       -- A position can only repeat since the last irreversible move (pawn
       -- move or capture), so only the last Halfmove plies have to be scanned.
-      -- This turns the previous O(game length) scan into O(halfmove).
       Window : constant Natural := Position.Halfmove;
       N      : Natural := 0;
       Start  : Natural;
       Lo     : Natural;
    begin
-      if Window > 0 and then Game_Key_Count > 0 then
-         Start := (if Game_Key_Count > Window
-                   then Game_Key_Count - Window
+      if Window > 0 and then Ctx.Game_Key_Count > 0 then
+         Start := (if Ctx.Game_Key_Count > Window
+                   then Ctx.Game_Key_Count - Window
                    else 0);
-         for I in Start .. Game_Key_Count - 1 loop
-            if Game_Keys (I) = Position.Key then
+         for I in Start .. Ctx.Game_Key_Count - 1 loop
+            if Ctx.Game_Keys (I) = Position.Key then
                N := N + 1;
                exit when N >= 2;
             end if;
@@ -367,7 +412,7 @@ package body BBChess.Search is
       if N < 2 and then Ply > 1 then
          Lo := (if Ply > Window then Ply - Window else 1);
          for P in Lo .. Ply - 1 loop
-            if Search_Path (P) = Position.Key then
+            if Ctx.Search_Path (P) = Position.Key then
                N := N + 1;
                exit when N >= 2;
             end if;
@@ -382,9 +427,7 @@ package body BBChess.Search is
       -- A fresh game also gets a fresh transposition table: entries from a
       -- previous game must not leak into the next one.
       Clear_Transposition_Table;
-      Reset_Killers;
-      Reset_History;
-      Game_Key_Count := 0;
+      Init_Game_Key_Count := 0;
       TT_Generation := 0;
    end Reset_Search;
 
@@ -397,63 +440,12 @@ package body BBChess.Search is
               or Position.Pieces (Make (Color, Queen))) /= 0;
    end Has_Non_Pawn;
 
-   -- Kind of the piece captured by Move (pawns for en-passant; the moving
-   -- piece itself when Move is not a capture - only used for ordering).
-   function Captured_Kind (Position : in Position_Type; Move : in Move_Type)
-     return Kind_Type is
-      P : Piece_Type;
-   begin
-      if Move.Flag = En_Passant then
-         return Pawn;
-      end if;
-      if Piece_At (Position, Move.To, P) then
-         return Kind (P);
-      end if;
-      return Pawn;
-   end Captured_Kind;
-
-   -- Move ordering score: hash move first, then captures (MVV-LVA), then
-   -- promotions, then the killers, then quiet moves ordered by the history
-   -- heuristic (moves that already produced beta cutoffs elsewhere).
-   function Order (Position   : in Position_Type;
-                   Move       : in Move_Type;
-                   Hash_Move  : in Move_Type;
-                   Ply        : in Natural) return Score_Type is
-   begin
-      if Move = Hash_Move then
-         return 100_000_000;
-      end if;
-
-      if Move.Flag = Promotion then
-         return 50_000_000 + Kind_Value (Kind (Move.Promotion));
-      end if;
-
-      if Is_Tactical (Position, Move) then
-         declare
-            Victim   : constant Score_Type :=
-              Kind_Value (Captured_Kind (Position, Move));
-            Attacker : constant Score_Type := Kind_Value (Kind (Move.Piece));
-         begin
-            return 2_000_000 + Victim * 16 - Attacker;
-         end;
-      end if;
-
-      -- Quiet move.
-      if Ply <= Max_Ply then
-         if Move = Killers (1, Ply) then
-            return 1_000_000;
-         elsif Move = Killers (2, Ply) then
-            return 900_000;
-         end if;
-      end if;
-      return History (Color (Move.Piece), Move.From, Move.To);
-   end Order;
-
    ----------------
    -- Quiescence --
    ----------------
 
-   function Quiescence (Position : in out Position_Type;
+   function Quiescence (Ctx        : in Context_Access;
+                        Position   : in out Position_Type;
                         Alpha, Beta : in Score_Type;
                         Ply        : in Natural) return Score_Type
    is
@@ -465,7 +457,7 @@ package body BBChess.Search is
       Count    : Natural;
       Limit    : Natural;
    begin
-      Poll_Time;
+      Poll_Time (Ctx);
 
       -- Stand pat is only legal when not in check: a side that is in check
       -- must play an evasion, so the static evaluation cannot be returned.
@@ -479,7 +471,6 @@ package body BBChess.Search is
          end if;
       end if;
 
-      Hash.Set_Keys_Enabled (False);
       if In_Check then
          -- Every evasion must be tried.
          Generate_Legal_Moves (Position, Moves, Count);
@@ -488,7 +479,6 @@ package body BBChess.Search is
          -- there is no need to generate the (numerous) quiet moves.
          Generate_Legal_Tactical_Moves (Position, Moves, Count);
       end if;
-      Hash.Set_Keys_Enabled (True);
 
       if Count = 0 and then In_Check then
          return -(Mate_Score - Ply);
@@ -563,7 +553,7 @@ package body BBChess.Search is
                   Score : Score_Type;
                begin
                   Make_Move (Position, Moves (I), Undo);
-                  Score := -Quiescence (Position, -B, -A, Ply + 1);
+                  Score := -Quiescence (Ctx, Position, -B, -A, Ply + 1);
                   Unmake_Move (Position, Moves (I), Undo);
 
                   if Score >= B then
@@ -593,7 +583,8 @@ package body BBChess.Search is
    -- Null move reduction.
    Null_Reduction  : constant := 2;
 
-   function Negamax (Position : in out Position_Type;
+   function Negamax (Ctx        : in Context_Access;
+                     Position   : in out Position_Type;
                      Depth, Ply : in Natural;
                      Alpha, Beta : in Score_Type) return Score_Type
    is
@@ -601,28 +592,27 @@ package body BBChess.Search is
       B           : Score_Type := Beta;
       Moves       : Move_List;
       Count       : Natural;
-       Hash_Move   : Move_Type := Empty_Move;
-       In_Check    : Boolean := False;
-       Best_Move_Here : Move_Type := Empty_Move;
-       Best_Score  : Score_Type := -Infinity;
-       Child_Depth : Natural := 0;
-    begin
-      Poll_Time;
+      Hash_Move   : Move_Type := Empty_Move;
+      In_Check    : Boolean := False;
+      Best_Move_Here : Move_Type := Empty_Move;
+      Best_Score  : Score_Type := -Infinity;
+      Child_Depth : Natural := 0;
+   begin
+      Poll_Time (Ctx);
       if Depth = 0 then
-         return Quiescence (Position, A, B, Ply);
+         return Quiescence (Ctx, Position, A, B, Ply);
       end if;
 
       -- Record the current node on the search path (for the repetition
       -- detection of its descendants) and claim a draw on a threefold
       -- repetition before trusting the transposition table.
       if Ply <= Max_Ply then
-         Search_Path (Ply) := Position.Key;
+         Ctx.Search_Path (Ply) := Position.Key;
       end if;
-      if Is_Repetition (Position, Ply) then
+      if Is_Repetition (Ctx, Position, Ply) then
          return 0;
       end if;
 
-      -- Transposition table probe.
       -- Transposition table probe (two-way bucket).
       declare
          Bk    : constant Natural := TT_Bucket (Position);
@@ -660,34 +650,26 @@ package body BBChess.Search is
          end if;
       end;
 
-      -- Move generation does not need the Zobrist key: keep it disabled so
-      -- that the per-candidate make/unmake legality tests stay cheap. The
-      -- generator also reports the in-check status (it computes it anyway),
-      -- so the search does not test it a second time.
-      Hash.Set_Keys_Enabled (False);
       Generate_Legal_Moves (Position, Moves, Count, In_Check);
-      Hash.Set_Keys_Enabled (True);
 
-       if Count = 0 then
-          if In_Check then
-             return -(Mate_Score - Ply);
-          else
-             return 0;
-          end if;
-       end if;
+      if Count = 0 then
+         if In_Check then
+            return -(Mate_Score - Ply);
+         else
+            return 0;
+         end if;
+      end if;
 
-       -- Check extension: evasions are forced, so an in-check node is
-       -- searched one ply deeper than a quiet one (a full ply instead of
-       -- going straight into the quiescence search). Bounded by Ply so that
-       -- a long checking sequence cannot explode the search.
-       if In_Check and then Depth >= 1 and then Ply <= Max_Ply - 4 then
-          Child_Depth := Depth;
-       else
-          Child_Depth := Depth - 1;
-       end if;
+      -- Check extension: evasions are forced, so an in-check node is
+      -- searched one ply deeper than a quiet one. Bounded by Ply so that a
+      -- long checking sequence cannot explode the search.
+      if In_Check and then Depth >= 1 and then Ply <= Max_Ply - 4 then
+         Child_Depth := Depth;
+      else
+         Child_Depth := Depth - 1;
+      end if;
 
-      -- Reverse futility pruning: a quiet, already decisive advantage at the
-      -- horizon can be returned without searching.
+      -- Reverse futility pruning.
       if Depth = 1 and then not In_Check then
          declare
             Eval_Now : constant Score_Type := Evaluate (Position);
@@ -706,8 +688,6 @@ package body BBChess.Search is
             Saved   : Position_Type := Position;
             N_Score : Score_Type;
          begin
-            -- Give the move to the opponent for a reduced search. The key
-            -- is updated incrementally (side flip + dropped en-passant).
             Position.Side := Opposite (Position.Side);
             if Position.En_Passant /= Ep_None then
                Position.Key :=
@@ -716,7 +696,7 @@ package body BBChess.Search is
             Position.En_Passant := Ep_None;
             Position.Key := Position.Key xor Hash.Side_Key;
 
-            N_Score := -Negamax (Position, Depth - 1 - Null_Reduction,
+            N_Score := -Negamax (Ctx, Position, Depth - 1 - Null_Reduction,
                                  Ply + 1, -B, -B + 1);
 
             Position := Saved;
@@ -731,12 +711,10 @@ package body BBChess.Search is
          Ord : array (1 .. 256) of Score_Type;
       begin
          for J in 1 .. Count loop
-            Ord (J) := Order (Position, Moves (J), Hash_Move, Ply);
+            Ord (J) := Order (Ctx, Position, Moves (J), Hash_Move, Ply);
          end loop;
 
          for I in 1 .. Count loop
-            -- Select the best remaining move (cheap for the small branching
-            -- factor here, keeps the list itself unmodified for the TT).
             declare
                Best_J : Natural := I;
                Best_O : Score_Type := Ord (I);
@@ -766,29 +744,27 @@ package body BBChess.Search is
             begin
                Make_Move (Position, Moves (I), Undo);
 
-                if I = 1 then
-                   Score := -Negamax (Position, Child_Depth, Ply + 1, -B, -A);
-                else
-                   -- PVS: null-window first, re-searched on a fail high.
-                   -- Late quiet moves get a one-ply LMR.
-                   if not Tactical and then Depth >= 3 and then I >= 4
-                     and then not In_Check
-                   then
-                      Score := -Negamax (Position, Child_Depth - 1, Ply + 1,
-                                         -A - 1, -A);
-                      if Score > A and then Score < B then
-                         Score := -Negamax (Position, Child_Depth, Ply + 1,
-                                            -B, -A);
-                      end if;
-                   else
-                      Score := -Negamax (Position, Child_Depth, Ply + 1,
-                                         -A - 1, -A);
-                      if Score > A and then Score < B then
-                         Score := -Negamax (Position, Child_Depth, Ply + 1,
-                                            -B, -A);
-                      end if;
-                   end if;
-                end if;
+               if I = 1 then
+                  Score := -Negamax (Ctx, Position, Child_Depth, Ply + 1, -B, -A);
+               else
+                  if not Tactical and then Depth >= 3 and then I >= 4
+                    and then not In_Check
+                  then
+                     Score := -Negamax (Ctx, Position, Child_Depth - 1, Ply + 1,
+                                        -A - 1, -A);
+                     if Score > A and then Score < B then
+                        Score := -Negamax (Ctx, Position, Child_Depth, Ply + 1,
+                                           -B, -A);
+                     end if;
+                  else
+                     Score := -Negamax (Ctx, Position, Child_Depth, Ply + 1,
+                                        -A - 1, -A);
+                     if Score > A and then Score < B then
+                        Score := -Negamax (Ctx, Position, Child_Depth, Ply + 1,
+                                           -B, -A);
+                     end if;
+                  end if;
+               end if;
 
                Unmake_Move (Position, Moves (I), Undo);
 
@@ -796,18 +772,18 @@ package body BBChess.Search is
                   Best_Score := Score;
                   Best_Move_Here := Moves (I);
                end if;
-                if Score >= B then
-                   if not Tactical and then Ply <= Max_Ply then
-                      if Killers (1, Ply) /= Moves (I) then
-                         Killers (2, Ply) := Killers (1, Ply);
-                         Killers (1, Ply) := Moves (I);
-                      end if;
-                      Bump_History (Position.Side, Moves (I).From,
-                                    Moves (I).To, History_Bonus (Depth));
-                   end if;
-                   Store (Position, Depth, Lower_Bound, Score, Best_Move_Here, Ply);
-                   return Score;
-                end if;
+               if Score >= B then
+                  if not Tactical and then Ply <= Max_Ply then
+                     if Ctx.Killers (1, Ply) /= Moves (I) then
+                        Ctx.Killers (2, Ply) := Ctx.Killers (1, Ply);
+                        Ctx.Killers (1, Ply) := Moves (I);
+                     end if;
+                     Bump_History (Ctx, Position.Side, Moves (I).From,
+                                   Moves (I).To, History_Bonus (Depth));
+                  end if;
+                  Store (Position, Depth, Lower_Bound, Score, Best_Move_Here, Ply);
+                  return Score;
+               end if;
                if Score > A then
                   A := Score;
                end if;
@@ -835,11 +811,12 @@ package body BBChess.Search is
    -- Root    --
    -------------
 
-   function Root_Search (Position  : in out Position_Type;
-                         Depth     : in Natural;
-                         Prev_Best : in Move_Type;
-                         Alpha     : in Score_Type;
-                         Beta      : in Score_Type;
+   function Root_Search (Ctx        : in Context_Access;
+                         Position   : in out Position_Type;
+                         Depth      : in Natural;
+                         Prev_Best  : in Move_Type;
+                         Alpha      : in Score_Type;
+                         Beta       : in Score_Type;
                          Best_Score : out Score_Type) return Move_Type
    is
       Root_Moves : Move_List;
@@ -849,9 +826,7 @@ package body BBChess.Search is
       Best       : Move_Type := Empty_Move;
       Best_Sc    : Score_Type := -Infinity;
    begin
-      Hash.Set_Keys_Enabled (False);
       Generate_Legal_Moves (Position, Root_Moves, Count);
-      Hash.Set_Keys_Enabled (True);
 
       if Count = 0 then
          Best_Score := 0;
@@ -862,7 +837,7 @@ package body BBChess.Search is
          Ord : array (1 .. 256) of Score_Type;
       begin
          for J in 1 .. Count loop
-            Ord (J) := Order (Position, Root_Moves (J), Prev_Best, 0);
+            Ord (J) := Order (Ctx, Position, Root_Moves (J), Prev_Best, 0);
          end loop;
 
          for I in 1 .. Count loop
@@ -895,11 +870,11 @@ package body BBChess.Search is
                Make_Move (Position, Root_Moves (I), Undo);
 
                if I = 1 then
-                  Score := -Negamax (Position, Depth - 1, 1, -B, -A);
+                  Score := -Negamax (Ctx, Position, Depth - 1, 1, -B, -A);
                else
-                  Score := -Negamax (Position, Depth - 1, 1, -A - 1, -A);
+                  Score := -Negamax (Ctx, Position, Depth - 1, 1, -A - 1, -A);
                   if Score > A and then Score < B then
-                     Score := -Negamax (Position, Depth - 1, 1, -B, -A);
+                     Score := -Negamax (Ctx, Position, Depth - 1, 1, -B, -A);
                   end if;
                end if;
 
@@ -913,8 +888,6 @@ package body BBChess.Search is
                   A := Score;
                end if;
                if A >= B then
-                  -- Fail high at the root: a wider window is needed. The
-                  -- move found so far is still a valid candidate.
                   exit;
                end if;
             end;
@@ -922,7 +895,6 @@ package body BBChess.Search is
       end;
 
       if Best /= Empty_Move then
-         -- Feed the root best move back to the TT for the next iteration.
          declare
             Bound : Bound_Type;
          begin
@@ -941,56 +913,86 @@ package body BBChess.Search is
       return Best;
    end Root_Search;
 
-   -----------------
-   -- Best_Move --
-   -----------------
+   ---------------------
+   -- Iterative search --
+   ---------------------
 
-   function Best_Move (Position : in Position_Type; Depth : in Natural)
-     return Move_Type is
+   type Thread_Result is
+      record
+         Best  : Move_Type := Empty_Move;
+         Score : Score_Type := -Infinity;
+         Depth : Natural := 0;
+         Nodes : Natural := 0;
+      end record;
+
+   function Iterative_Search (Ctx        : in Context_Access;
+                              Position   : in Position_Type;
+                              Max_Depth  : in Natural;
+                              Time_Alloc : in Duration;
+                              Report     : in Boolean) return Thread_Result
+   is
+      Result     : Thread_Result;
+      Work       : Position_Type := Position;
       Best       : Move_Type := Empty_Move;
       Best_Score : Score_Type := 0;
-      Work       : Position_Type := Position;
       Alpha      : Score_Type := -Infinity;
       Beta       : Score_Type := Infinity;
       Score      : Score_Type;
+      T0         : constant Time := Clock;
+      Nodes_Base : constant Natural := Ctx.Nodes_Count;
+      Completed  : Boolean := False;
+      Last_Depth : Natural := 0;
    begin
-      if Depth = 0 then
-         return Empty_Move;
-      end if;
-
-      Disarm_Time_Limit;
-      Hash.Set_Keys_Enabled (True);
       Work.Key := Hash.Compute (Work);
-      -- The transposition table is NOT cleared here: it persists across the
-      -- moves of a game (it is only reset on "new" via Reset_Search), which
-      -- lets the search reuse nodes seen earlier in the game.
-      Reset_Killers;
-      TT_Generation := TT_Generation + 1;
 
-      for D in 1 .. Depth loop
-         -- Aspiration windows: from the second iteration on, search around
-         -- the previous result. A fail high or low re-searches the depth on
-         -- the full window (kept correct, still cheap when the window holds).
-         if D = 1 then
-            Alpha := -Infinity;
-            Beta  := Infinity;
-            Best := Root_Search (Work, D, Best, Alpha, Beta, Score);
-         else
-            Alpha := Best_Score - Aspiration_Window;
-            Beta  := Best_Score + Aspiration_Window;
-            Best := Root_Search (Work, D, Best, Alpha, Beta, Score);
-            if Score <= Alpha or else Score >= Beta then
+      begin
+         for D in 1 .. Max_Depth loop
+            if Time_Alloc > 0.0
+              and then To_Duration (Clock - Ctx.Start_Time) >= Time_Alloc
+            then
+               exit;
+            end if;
+
+            if D = 1 then
                Alpha := -Infinity;
                Beta  := Infinity;
-               Best := Root_Search (Work, D, Best, Alpha, Beta, Score);
+               Best := Root_Search (Ctx, Work, D, Best, Alpha, Beta, Score);
+            else
+               Alpha := Best_Score - Aspiration_Window;
+               Beta  := Best_Score + Aspiration_Window;
+               Best := Root_Search (Ctx, Work, D, Best, Alpha, Beta, Score);
+               if Score <= Alpha or else Score >= Beta then
+                  Alpha := -Infinity;
+                  Beta  := Infinity;
+                  Best := Root_Search (Ctx, Work, D, Best, Alpha, Beta, Score);
+               end if;
             end if;
-         end if;
-         Best_Score := Score;
-         exit when Abs (Best_Score) >= Mate_Score - 200;
-      end loop;
+            Best_Score := Score;
+            Completed := True;
+            Last_Depth := D;
 
-      return Best;
-   end Best_Move;
+            if Report then
+               Report_Iteration (D, Best_Score, To_Duration (Clock - T0),
+                                 Ctx.Nodes_Count - Nodes_Base, Best);
+            end if;
+
+            exit when Abs (Best_Score) >= Mate_Score - 200;
+         end loop;
+      exception
+         when Search_Interrupted =>
+            -- Current iteration cut short by the deadline: keep the move of
+            -- the last fully completed iteration (if any).
+            null;
+      end;
+
+      if Completed then
+         Result.Best := Best;
+         Result.Score := Best_Score;
+         Result.Depth := Last_Depth;
+      end if;
+      Result.Nodes := Ctx.Nodes_Count;
+      return Result;
+   end Iterative_Search;
 
    ---------------------
    -- Quick_Move --
@@ -998,16 +1000,12 @@ package body BBChess.Search is
 
    -- Safety net used when the time budget is so small that not even the
    -- first iteration completes: return a legal move without searching.
-   -- Tactical moves (captures / promotions) are preferred, otherwise the
-   -- first legal move of the list.
    function Quick_Move (Position : in Position_Type) return Move_Type is
       Moves    : Move_List;
       Count    : Natural;
       Fallback : Move_Type := Empty_Move;
    begin
-      Hash.Set_Keys_Enabled (False);
       Generate_Legal_Moves (Position, Moves, Count);
-      Hash.Set_Keys_Enabled (True);
       for I in 1 .. Count loop
          if Is_Tactical (Position, Moves (I)) then
             return Moves (I);
@@ -1019,86 +1017,186 @@ package body BBChess.Search is
       return Fallback;
    end Quick_Move;
 
-   ------------------------
-   -- Best_Move (time) --
-   ------------------------
+   --------------------------------
+   -- Node accounting (benchmark) --
+   --------------------------------
+
+   Accum_Nodes : Natural := 0;
+
+   function Nodes_Searched return Natural is
+   begin
+      return Accum_Nodes;
+   end Nodes_Searched;
+
+   procedure Reset_Nodes is
+   begin
+      Accum_Nodes := 0;
+   end Reset_Nodes;
+
+   -----------------
+   -- Best_Move (fixed depth) --
+   -----------------
+
+   function Best_Move (Position : in Position_Type; Depth : in Natural)
+     return Move_Type is
+      Ctx    : constant Context_Access := new Search_Context;
+      Result : Thread_Result;
+   begin
+      if Depth = 0 then
+         return Empty_Move;
+      end if;
+
+      Hash.Set_Keys_Enabled (True);
+      Init_Context (Ctx, Arm => False, Budget => 0.0);
+      TT_Generation := TT_Generation + 1;
+
+      Result := Iterative_Search (Ctx, Position, Depth, 0.0, False);
+      Accum_Nodes := Accum_Nodes + Ctx.Nodes_Count;
+
+      if Result.Best = Empty_Move then
+         return Quick_Move (Position);
+      end if;
+      return Result.Best;
+   end Best_Move;
+
+   -------------------------
+   -- Lazy SMP (threads) --
+   -------------------------
+
+   Max_Threads : constant := 16;
+   Num_Threads : Natural := 1;
+
+   procedure Set_Threads (N : in Natural) is
+   begin
+      if N < 1 then
+         Num_Threads := 1;
+      elsif N > Max_Threads then
+         Num_Threads := Max_Threads;
+      else
+         Num_Threads := N;
+      end if;
+   end Set_Threads;
+
+   protected type Completion is
+      procedure Reset;
+      procedure Signal;
+      entry Wait_All;
+   private
+      Count : Natural := 0;
+   end Completion;
+
+   protected body Completion is
+      procedure Reset is
+      begin
+         Count := 0;
+      end Reset;
+
+      procedure Signal is
+      begin
+         Count := Count + 1;
+      end Signal;
+
+      entry Wait_All when Count >= Num_Threads is
+      begin
+         null;
+      end Wait_All;
+   end Completion;
+
+   Done : Completion;
+
+   Root_Position  : Position_Type;
+   Root_Max_Depth : Natural := 1;
+   Root_Time      : Duration := 0.0;
+   Results        : array (1 .. Max_Threads) of Thread_Result;
+
+   task type Searcher (Id : Positive);
+
+   task body Searcher is
+      Ctx : constant Context_Access := new Search_Context;
+   begin
+      Init_Context (Ctx, Arm => Root_Time > 0.0, Budget => Root_Time);
+      Results (Id) := Iterative_Search (Ctx, Root_Position,
+                                        Root_Max_Depth, Root_Time,
+                                        Report => (Id = 1));
+      -- The primary thread stops the helpers as soon as it is done.
+      if Id = 1 then
+         Stop_Search := True;
+      end if;
+      Done.Signal;
+   end Searcher;
+
+   type Searcher_Access is access Searcher;
 
    function Best_Move (Position   : in Position_Type;
                        Max_Depth  : in Natural;
-                       Time_Alloc : in Duration) return Move_Type is
-      Best        : Move_Type := Empty_Move;
-      Best_Score  : Score_Type := 0;
-      Work        : Position_Type := Position;
-      Completed   : Boolean := False;
-      Alpha       : Score_Type := -Infinity;
-      Beta        : Score_Type := Infinity;
-      Score       : Score_Type;
-      T0          : Time := Clock;      -- start of this search (reporting)
-      Nodes_Base  : Natural := 0;       -- nodes before this search
+                       Time_Alloc : in Duration) return Move_Type
+   is
+      Best : Move_Type := Empty_Move;
    begin
       if Max_Depth = 0 then
          return Empty_Move;
       end if;
 
       Hash.Set_Keys_Enabled (True);
-      Work.Key := Hash.Compute (Work);
-      -- The transposition table persists across the moves of a game (reset
-      -- only on "new" via Reset_Search).
-      Reset_Killers;
       TT_Generation := TT_Generation + 1;
 
-      Disarm_Time_Limit;
-      if Time_Alloc > 0.0 then
-         Arm_Time_Limit (Time_Alloc);
+      if Num_Threads <= 1 then
+         declare
+            Ctx    : constant Context_Access := new Search_Context;
+            Result : Thread_Result;
+         begin
+            Init_Context (Ctx, Arm => Time_Alloc > 0.0, Budget => Time_Alloc);
+            Result := Iterative_Search (Ctx, Position, Max_Depth,
+                                        Time_Alloc, True);
+            Accum_Nodes := Accum_Nodes + Ctx.Nodes_Count;
+            if Result.Best = Empty_Move then
+               return Quick_Move (Position);
+            end if;
+            return Result.Best;
+         end;
       end if;
-      T0 := Clock;
-      Nodes_Base := Nodes_Count;
 
+      -- Multi-threaded Lazy SMP.
+      Root_Position := Position;
+      Root_Max_Depth := Max_Depth;
+      Root_Time := Time_Alloc;
+      Stop_Search := False;
+      Done.Reset;
+
+      declare
+         Workers : array (1 .. Num_Threads) of Searcher_Access;
       begin
-         for D in 1 .. Max_Depth loop
-            if Time_Alloc > 0.0
-              and then To_Duration (Clock - Start_Time) >= Time_Alloc
-            then
-               exit;
-            end if;
-
-            if D = 1 then
-               Alpha := -Infinity;
-               Beta  := Infinity;
-               Best := Root_Search (Work, D, Best, Alpha, Beta, Score);
-            else
-               Alpha := Best_Score - Aspiration_Window;
-               Beta  := Best_Score + Aspiration_Window;
-               Best := Root_Search (Work, D, Best, Alpha, Beta, Score);
-               if Score <= Alpha or else Score >= Beta then
-                  Alpha := -Infinity;
-                  Beta  := Infinity;
-                  Best := Root_Search (Work, D, Best, Alpha, Beta, Score);
-               end if;
-            end if;
-            Best_Score := Score;
-            Completed := True;
-
-            Report_Iteration (D, Best_Score, To_Duration (Clock - T0),
-                              Nodes_Count - Nodes_Base, Best);
-
-            exit when Abs (Best_Score) >= Mate_Score - 200;
+         for I in 1 .. Num_Threads loop
+            Results (I) := (Best => Empty_Move, Score => -Infinity,
+                            Depth => 0, Nodes => 0);
+            Workers (I) := new Searcher (I);
          end loop;
-      exception
-         when Search_Interrupted =>
-            -- Current iteration cut short by the deadline: keep the move of
-            -- the last fully completed iteration (if any).
-            null;
+
+         Done.Wait_All;
       end;
 
-      Disarm_Time_Limit;
+      -- Node accounting and result selection (the deepest, then best score).
+      declare
+         Best_Depth : Natural := 0;
+         Best_Score : Score_Type := -Infinity;
+      begin
+         for I in 1 .. Num_Threads loop
+            Accum_Nodes := Accum_Nodes + Results (I).Nodes;
+            if Results (I).Best /= Empty_Move
+              and then (Results (I).Depth > Best_Depth
+                        or else (Results (I).Depth = Best_Depth
+                                 and then Results (I).Score > Best_Score))
+            then
+               Best_Depth := Results (I).Depth;
+               Best_Score := Results (I).Score;
+               Best := Results (I).Best;
+            end if;
+         end loop;
+      end;
 
-      if not Completed or else Best = Empty_Move then
-         -- No iteration completed within the budget (or the side to move has
-         -- no legal move). Return something legal without searching more.
+      if Best = Empty_Move then
          Best := Quick_Move (Position);
       end if;
-
       return Best;
    end Best_Move;
 

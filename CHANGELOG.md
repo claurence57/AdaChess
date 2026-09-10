@@ -33,6 +33,11 @@
   tuning non concluante sur petit dataset : paramètres par défaut conservés
   (cf. `DEVELOPMENT.md` § 7sexies).
 
+### Recherche & bitboards
+- **Lazy SMP** : TT partagée, état de recherche par thread (tâches Ada),
+  `--threads N` / UCI `setoption name Threads value N`. +127 Elo à 4 threads.
+- **Attaques par PEXT** (BMI2) à la place des magics : démarrage ~1,9 s → ~0,03 s.
+
 ### Évaluation
 - Sécurité du roi renforcée (zone à distance 2, danger non linéaire, roi
   exposé) — cf. `DEVELOPMENT.md` § 7bis.

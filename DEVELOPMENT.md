@@ -443,6 +443,25 @@ d'éval sur des parties d'auto-jeu ne corrèle pas avec la force de jeu ; il
 faudrait un dataset bien plus grand/divers (ou une recherche de paramètres
 validée par SPRT). **Les valeurs par défaut sont conservées.**
 
+## 7septies. Lazy SMP & attaques PEXT
+
+**Lazy SMP** (`bbchess-search.adb`) : la TT est **partagée** entre les threads,
+tandis que l'état de recherche (killers, historique, chemin de répétition,
+compteur de nœuds, échéance) vit dans un `Search_Context` **par thread**. Les
+threads sont des tâches Ada ; le thread primaire (1) produit et rapporte le
+résultat, les autres remplissent la TT. Le drapeau d'arrêt est `pragma Atomic`.
+Activation : `--threads N` ou UCI `setoption name Threads value N` (max 16).
+- Mesure : à 1 s+0,1 s, **1 thread 2-9-9 4 threads** (SMP ≈ **+127 Elo**) ;
+  occupation CPU 99 % → 759 % selon N, temps respecté (budget identique).
+- La génération de coups ne touche plus au drapeau global `Keys_Enabled`
+  (clé toujours maintenue pendant la recherche) : c'était nécessaire pour le
+  SMP (le drapeau global aurait été une course entre threads).
+
+**Attaques par PEXT** (`bbchess-attacks.adb`, `bbchess-bits.c`) : les magics
+sont remplacés par un indexage `_pext_u64` (BMI2) sur le masque d'occupation.
+Plus de recherche de magics au démarrage : le **démarrage passe de ~1,9 s à
+~0,03 s** (et le self-test de ~2,4 s à ~0,27 s). Compilation `-mbmi2`.
+
 ## 8. État actuel & chantiers restants
 
 **Validations** : `./bin_bb/adachess_bb --selftest` passe (perft + roque + éval +
