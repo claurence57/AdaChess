@@ -32,6 +32,8 @@ use BBChess.Board;
 with BBChess.Moves;
 use BBChess.Moves;
 
+with BBChess.Hash;
+
 with BBChess.Movegen;
 use BBChess.Movegen;
 
@@ -134,6 +136,48 @@ procedure AdaChess_BB is
    Force       : Boolean := True;
    Protocol    : Boolean := False;
 
+   -- Game history (Zobrist keys of every position played, oldest first) for
+   -- the threefold-repetition detection in the search. Keys are recorded
+   -- after every real move applied to Pos (both sides) and at "new"/FEN.
+   Game_Keys : BBChess.Search.Game_Key_Array := (others => 0);
+   Game_N    : Natural := 0;
+
+   procedure Push_Game_Key (Key : in Bitboard) is
+   begin
+      if Game_N = BBChess.Search.Max_Game_Keys then
+         -- Drop the oldest position: the game is longer than the buffer.
+         for I in 1 .. Game_N - 1 loop
+            Game_Keys (I - 1) := Game_Keys (I);
+         end loop;
+         Game_N := Game_N - 1;
+      end if;
+      Game_Keys (Game_N) := Key;
+      Game_N := Game_N + 1;
+   end Push_Game_Key;
+
+   -- Record the current position (freshly computed Zobrist key) as a new
+   -- entry of the game history, unless it is already the last one.
+   procedure Record_Current_Key is
+      K : constant Bitboard := BBChess.Hash.Compute (Pos);
+   begin
+      if Game_N = 0 or else Game_Keys (Game_N - 1) /= K then
+         Push_Game_Key (K);
+      end if;
+   end Record_Current_Key;
+
+   -- Hand the game history to the search before it starts to think.
+   procedure Sync_Game_History is
+   begin
+      BBChess.Search.Set_Game_History (Game_Keys, Game_N);
+   end Sync_Game_History;
+
+   -- Start a fresh game history and record the given position.
+   procedure Reset_Game_History is
+   begin
+      Game_N := 0;
+      Record_Current_Key;
+   end Reset_Game_History;
+
    -- Clock state, driven by the XBoard "st", "level" and "time" commands.
    Fixed_Time     : Boolean := False;  -- "st <s>": think exactly that long
    Move_Time      : Duration := 1.0;   -- fixed budget, or fallback w/o clock
@@ -179,6 +223,11 @@ procedure AdaChess_BB is
    procedure Play_If_My_Turn is
    begin
       if Protocol and then not Force and then Pos.Side = Engine_Side then
+         -- Make sure the game history ends with the current position (a
+         -- real move may have been played since the last sync) and give it
+         -- to the search before it thinks.
+         Record_Current_Key;
+         Sync_Game_History;
          declare
             M    : constant Move_Type :=
               Best_Move (Pos, Max_Depth, Time_For_Next_Move);
@@ -190,11 +239,11 @@ procedure AdaChess_BB is
                Ada.Text_IO.New_Line;
                Ada.Text_IO.Flush;
                Make_Move (Pos, M, Undo);
+               Record_Current_Key;
             end if;
          end;
       end if;
    end Play_If_My_Turn;
-
 begin
    -- Self test mode.
    if Ada.Command_Line.Argument_Count > 0
@@ -251,11 +300,13 @@ begin
              Time_Increment := 0.0;
              Max_Depth := 64;
              Reset_Search;
+             Reset_Game_History;
 
          elsif Cmd = "setboard" then
             begin
                Load (Pos, Par);
                Force := True;
+               Reset_Game_History;
             exception
                when Constraint_Error =>
                   Ada.Text_IO.Put_Line ("Error (bad FEN): " & Par);

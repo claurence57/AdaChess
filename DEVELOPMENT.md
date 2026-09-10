@@ -233,12 +233,51 @@ A/B **référence (git `50c06fb`, version bouclée) vs nouvelle version** : 20 p
 à 1 s+0,1 s, **NEW bat REF 10-3-7** (≈ +127 Elo) — aucun signe de régression et un
 léger gain, self-test vert.
 
-## 6. État actuel & chantiers restants
+## 6. Release bb-1.0 & Phase A (TT persistante + répétitions)
+
+### 6.1 Release `bb-1.0` (référence figée)
+- Version exposée : `feature myname="AdaChess-BB 1.0"` ; `CHANGELOG.md` ajouté.
+- Tag git annoté **`bb-1.0`** (sur `084e08c`, avant Phase A).
+- Binaire de référence installé dans **`~/bin/adachess_bb`** (+ `~/bin` au PATH) :
+  c'est la référence des A/B futurs.
+- Scripts réutilisables : `scripts/ab.sh` (référence vs HEAD) et
+  `scripts/vs_gnuchess.sh` (vs GNU Chess). L'ancien tag `v4.0` correspond à la
+  ligne MB d'origine, d'où un nommage `bb-*` pour éviter la confusion.
+
+### 6.2 Phase A — TT persistante entre les coups
+La table de transposition n'est **plus vidée à chaque `Best_Move`** : elle est
+conservée d'un coup à l'autre de la partie (reset seulement sur `new` via
+`Reset_Search`). Les scores de mat étaient déjà encodés en `value_to_tt` /
+`value_from_tt` (décalage par le ply à l'écriture, inverse à la lecture), donc
+indépendants du root : aucune modification nécessaire. Gain : le moteur réutilise
+les nœuds vus plus tôt dans la partie.
+
+### 6.3 Phase A — détection de répétition (3-fold)
+- `adachess_bb` tient un **historique des clés Zobrist** de toutes les positions
+  de la partie (`Game_Keys`, capacité 512) ; il le transmet à la recherche avant
+  chaque réflexion (`Set_Game_History`).
+- Dans `Negamax`, le nœud courant est comparé à l'historique de partie **et** au
+  chemin de recherche (`Search_Path`, par ply). Si la position est déjà apparue
+  **deux fois** (donc la visite courante est la 3ᵉ), le nœud renvoie une nulle.
+  Un test dédié vérifie que la recherche reste correcte avec un historique
+  répété et que `Reset_Search` remet l'historique à zéro.
+
+Résultats A/B (1 s+0,1 s, 20 parties, graine 7) : **NEW bat REF 8-0-12**
+(≈ +147 Elo, LOS ≈ 99,8 %) — pas de régression, gain net. Self-test vert
+(perft inchangé + test répétition).
+
+**Bug préexistant repéré (non corrigé)** : sur un **FEN illégal** où le camp au
+trait est « en échec » vis-à-vis du roi adverse (donc le roi adverse est
+capturable), le moteur capture le roi puis `Lowest_Bit` plante. N'arrive jamais
+dans une partie légale ; à durcir plus tard (validation de FEN à l'entrée).
+
+## 7. État actuel & chantiers restants
 
 **Validations** : `./bin_bb/adachess_bb --selftest` passe (perft + roque + éval +
-recherche + **SEE**). Self-tests et perft ne doivent **jamais régresser**. Note :
-avec le **tempo**, `Evaluate` n'est plus exactement antisymétrique ; le test de
-symétrie porte sur `Static` (départ = 0, miroir ⇒ `-Static`).
+recherche + **SEE** + répétition). Self-tests et perft ne doivent **jamais
+régresser**. Note : avec le **tempo**, `Evaluate` n'est plus exactement
+antisymétrique ; le test de symétrie porte sur `Static` (départ = 0, miroir ⇒
+`-Static`).
 
 **Adversaire de référence des mini-matchs** : **GNU Chess** (`/usr/games/gnuchess`,
 moteur **UCI** ~2400-2500 Elo, bien plus fort que MB). Se joue via un wrapper car
@@ -252,7 +291,7 @@ dir=/tmp -engine name=BB cmd="$PWD/bin_bb/adachess_bb" proto=xboard dir="$PWD" .
 (le mode xboard de GNU Chess 6.2.7 est incomplet : il n'émet jamais
 `feature done=1`, d'où l'usage d'UCI).
 
-**Problèmes / chantiers restants (après les chantiers 2 & 3, cf. § 5.4 / § 5.5)**
+**Problèmes / chantiers restants (après les chantiers 2, 3 et la Phase A)**
 1. **Temps** : les forfaits sous cutechess sont corrigés (recherche interruptible) et
    BB tient MB à 20+1 sur un petit échantillon. Reste à **confirmer sur plus de
    parties longues** et à **tuner l'allocation** si besoin (constantes en tête
@@ -273,10 +312,10 @@ dir=/tmp -engine name=BB cmd="$PWD/bin_bb/adachess_bb" proto=xboard dir="$PWD" .
 gprbuild -P adachess.gpr   -XMode=release    # MB
 gprbuild -P adachess_bb.gpr -XMode=release   # BB
 ./bin_bb/adachess_bb --selftest              # tests BB
-# Mini-match BB vs GNU Chess (UCI, wrapper requis) :
-cutechess-cli -engine name=BB cmd="$PWD/bin_bb/adachess_bb" proto=xboard dir="$PWD" \
-              -engine name=GNU cmd=/tmp/opencode/gnuchess_uci.sh proto=uci dir=/tmp \
-              -each tc=20+1 -games 2 -maxmoves 80 -pgnout match.pgn
+# A/B référence (~/bin/adachess_bb, tag bb-1.0) vs HEAD :
+scripts/ab.sh 1+0.1 20 7                     # tc, parties, graine
+# Match vs GNU Chess (UCI, wrapper requis) :
+scripts/vs_gnuchess.sh 30+1 12 7             # tc, parties, graine
 ```
 
 **Règle d'or pour la suite** : toute modification (éval, search, movegen) doit garder

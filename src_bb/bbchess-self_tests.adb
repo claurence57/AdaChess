@@ -307,6 +307,35 @@ package body BBChess.Self_Tests is
                  "timed Best_Move overran its budget");
       end;
 
+      -- Repetition handling: with a game history where the current position
+      -- already occurred twice, the search must still return a legal move
+      -- (draws are detected inside the tree, not at the root) and Reset_Search
+      -- must clear the history for the next game.
+      declare
+         Pos  : Position_Type;
+         Best : Move_Type;
+         Keys : Game_Key_Array := (others => 0);
+         List : Move_List;
+         Count : Natural;
+         Found : Boolean := False;
+      begin
+         Load (Pos, "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1");
+         Keys (0) := Pos.Key;
+         Keys (1) := Pos.Key;   -- the current position "already seen twice"
+         Set_Game_History (Keys, 2);
+         Best := Best_Move (Pos, 4);
+         Generate_Legal_Moves (Pos, List, Count);
+         for I in 1 .. Count loop
+            if List (I) = Best then
+               Found := True;
+               exit;
+            end if;
+         end loop;
+         Assert (Found, "search with a repeated history returned an illegal move");
+         Reset_Search;
+         Ada.Text_IO.Put_Line ("repetition handling OK");
+      end;
+
       -- Static exchange evaluation: undefended pieces, recaptures, losing
       -- lines and pinned defenders must be scored consistently.
       declare

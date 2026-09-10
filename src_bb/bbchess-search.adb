@@ -217,10 +217,64 @@ package body BBChess.Search is
       end if;
    end Bump_History;
 
+   -- Keys of the positions of the current game (including the current one),
+   -- for the threefold-repetition detection, plus the key of every node on
+   -- the current search path (indexed by Ply). A position already seen twice
+   -- on this reversible part of the line is a draw.
+   Game_Keys      : Game_Key_Array := (others => 0);
+   Game_Key_Count : Natural := 0;
+   Search_Path    : array (0 .. Max_Ply) of Bitboard := (others => 0);
+
+   procedure Set_Game_History (Keys  : in Game_Key_Array;
+                               Count : in Natural) is
+   begin
+      if Count > Max_Game_Keys then
+         Game_Key_Count := Max_Game_Keys;
+      else
+         Game_Key_Count := Count;
+      end if;
+      for I in 0 .. Game_Key_Count - 1 loop
+         Game_Keys (I) := Keys (I);
+      end loop;
+   end Set_Game_History;
+
+   -- True when Position has already occurred twice before on the current
+   -- line: once is not enough (that would only be the second visit). The
+   -- occurrences are looked up in the game history and among the ancestors
+   -- of the current node (plies 1 .. Ply-1, the root being the last game
+   -- key). Ply is the depth of the node below the search root.
+   function Is_Repetition (Position : in Position_Type;
+                           Ply       : in Natural) return Boolean
+   is
+      N : Natural := 0;
+   begin
+      for I in 0 .. Game_Key_Count - 1 loop
+         if Game_Keys (I) = Position.Key then
+            N := N + 1;
+            exit when N >= 2;
+         end if;
+      end loop;
+
+      if N < 2 and then Ply > 1 then
+         for P in 1 .. Ply - 1 loop
+            if Search_Path (P) = Position.Key then
+               N := N + 1;
+               exit when N >= 2;
+            end if;
+         end loop;
+      end if;
+
+      return N >= 2;
+   end Is_Repetition;
+
    procedure Reset_Search is
    begin
+      -- A fresh game also gets a fresh transposition table: entries from a
+      -- previous game must not leak into the next one.
+      Clear_Transposition_Table;
       Reset_Killers;
       Reset_History;
+      Game_Key_Count := 0;
    end Reset_Search;
 
    function Has_Non_Pawn (Position : in Position_Type; Color : in Color_Type)
@@ -443,6 +497,16 @@ package body BBChess.Search is
       Poll_Time;
       if Depth = 0 then
          return Quiescence (Position, A, B, Ply);
+      end if;
+
+      -- Record the current node on the search path (for the repetition
+      -- detection of its descendants) and claim a draw on a threefold
+      -- repetition before trusting the transposition table.
+      if Ply <= Max_Ply then
+         Search_Path (Ply) := Position.Key;
+      end if;
+      if Is_Repetition (Position, Ply) then
+         return 0;
       end if;
 
       -- Transposition table probe.
@@ -768,7 +832,9 @@ package body BBChess.Search is
       Disarm_Time_Limit;
       Hash.Set_Keys_Enabled (True);
       Work.Key := Hash.Compute (Work);
-      Clear_Transposition_Table;
+      -- The transposition table is NOT cleared here: it persists across the
+      -- moves of a game (it is only reset on "new" via Reset_Search), which
+      -- lets the search reuse nodes seen earlier in the game.
       Reset_Killers;
 
       for D in 1 .. Depth loop
@@ -844,7 +910,8 @@ package body BBChess.Search is
 
       Hash.Set_Keys_Enabled (True);
       Work.Key := Hash.Compute (Work);
-      Clear_Transposition_Table;
+      -- The transposition table persists across the moves of a game (reset
+      -- only on "new" via Reset_Search).
       Reset_Killers;
 
       Disarm_Time_Limit;
