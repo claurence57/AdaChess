@@ -16,9 +16,9 @@ package body BBChess.Movegen is
 
    function Is_Attacked (Position : in Position_Type;
                          Square   : in Square_Type;
-                         By       : in Color_Type) return Boolean
+                         By       : in Color_Type;
+                         Occ      : in Bitboard) return Boolean
    is
-      Occ : constant Bitboard := Occupancy (Position);
    begin
       -- Pawns: a White pawn attacks upward, so a White attacker of Square
       -- sits on the squares a Black pawn standing on Square would attack
@@ -53,6 +53,36 @@ package body BBChess.Movegen is
 
       return False;
    end Is_Attacked;
+
+   function Is_Attacked (Position : in Position_Type;
+                         Square   : in Square_Type;
+                         By       : in Color_Type) return Boolean is
+   begin
+      return Is_Attacked (Position, Square, By, Occupancy (Position));
+   end Is_Attacked;
+
+   -- Every piece of By that attacks Square (used for check detection and
+   -- check evasion).
+   function Attackers_To (Position : in Position_Type;
+                          Square   : in Square_Type;
+                          By       : in Color_Type) return Bitboard
+   is
+      Occ : constant Bitboard := Occupancy (Position);
+   begin
+      return
+        (Pawn_Attacks (Opposite (By), Square)
+           and Position.Pieces (Make (By, Pawn)))
+        or (Knight_Attacks (Square)
+              and Position.Pieces (Make (By, Knight)))
+        or (Bishop_Attacks (Square, Occ)
+              and (Position.Pieces (Make (By, Bishop))
+                     or Position.Pieces (Make (By, Queen))))
+        or (Rook_Attacks (Square, Occ)
+              and (Position.Pieces (Make (By, Rook))
+                     or Position.Pieces (Make (By, Queen))))
+        or (King_Attacks (Square)
+              and Position.Pieces (Make (By, King)));
+   end Attackers_To;
 
    function King_In_Check (Position : in Position_Type; Color : in Color_Type)
      return Boolean is
@@ -384,48 +414,73 @@ begin
       Tactical : in Boolean;
       In_Check : out Boolean)
    is
-      Pseudo  : Move_List;
-      P_Count : Natural;
-      Undo    : Undo_Info;
-      Work    : Position_Type := Position;
-      Pinned   : Bitboard;
-      Need_Test : Boolean;
+      Pseudo   : Move_List;
+      P_Count  : Natural;
+      Undo     : Undo_Info;
+      Work     : Position_Type := Position;
+      Side     : constant Color_Type := Position.Side;
+      Opp      : constant Color_Type := Opposite (Side);
+      Occ      : constant Bitboard := Occupancy (Position);
+      King_Sq  : constant Square_Type := King_Square (Position, Side);
+      Checkers : constant Bitboard := Attackers_To (Position, King_Sq, Opp);
+      Pinned   : constant Bitboard := Pin_Mask (Position, Side);
+      -- Squares a non-king move must reach to resolve a check (all squares
+      -- when there is no check).
+      Check_Mask : Bitboard;
+      -- Occupancy seen by the king after it leaves its square (reveals
+      -- discovered attacks along its ray).
+      Occ_No_King : constant Bitboard := Occ and not Bit (King_Sq);
    begin
       Count := 0;
-      In_Check := King_In_Check (Position, Position.Side);
+      In_Check := Checkers /= 0;
       Generate_Pseudo_Moves (Position, Pseudo, P_Count, Tactical);
 
-      -- When the side to move is not in check, a pseudo-legal move can only
-      -- be illegal if it moves the king, an absolutely pinned piece, or an
-      -- en-passant capture. Everything else is legal without further testing.
       if In_Check then
-         Pinned := 0;
+         if (Checkers and (Checkers - 1)) = 0 then
+            -- Single check: capture the checker or interpose.
+            Check_Mask := Bit (Lowest_Bit (Checkers))
+                          or Between (King_Sq, Lowest_Bit (Checkers));
+         else
+            -- Double check: only the king can move.
+            Check_Mask := 0;
+         end if;
       else
-         Pinned := Pin_Mask (Position, Position.Side);
+         Check_Mask := not Bitboard (0);
       end if;
 
       for I in 1 .. P_Count loop
-         if In_Check
-           or else Kind (Pseudo (I).Piece) = King
-           or else Pseudo (I).Flag = En_Passant
-           or else (Bit (Pseudo (I).From) and Pinned) /= 0
-         then
-            Need_Test := True;
-         else
-            Need_Test := False;
-         end if;
-
-         if not Need_Test then
-            Count := Count + 1;
-            Moves (Count) := Pseudo (I);
-         else
-            Make_Move (Work, Pseudo (I), Undo);
-            if not King_In_Check (Work, Position.Side) then
-               Count := Count + 1;
-               Moves (Count) := Pseudo (I);
+         declare
+            M : Move_Type renames Pseudo (I);
+         begin
+            if Kind (M.Piece) = King then
+               -- A king may not step onto an attacked square (with the king
+               -- removed from the occupancy so discovered attacks count).
+               if not Is_Attacked (Position, M.To, Opp, Occ_No_King) then
+                  Count := Count + 1;
+                  Moves (Count) := M;
+               end if;
+            elsif M.Flag = En_Passant then
+               -- Rare: the make/unmake test covers the rank-discovered and
+               -- check-resolving cases uniformly.
+               Make_Move (Work, M, Undo);
+               if not King_In_Check (Work, Side) then
+                  Count := Count + 1;
+                  Moves (Count) := M;
+               end if;
+               Unmake_Move (Work, M, Undo);
+            else
+               -- Non-king move: must resolve the check and, when the piece is
+               -- absolutely pinned, stay on its pin line.
+               if (Check_Mask and Bit (M.To)) /= 0
+                 and then
+                   ((Bit (M.From) and Pinned) = 0
+                    or else (Line (King_Sq, M.From) and Bit (M.To)) /= 0)
+               then
+                  Count := Count + 1;
+                  Moves (Count) := M;
+               end if;
             end if;
-            Unmake_Move (Work, Pseudo (I), Undo);
-         end if;
+         end;
       end loop;
    end Generate_Legal_Common;
 
