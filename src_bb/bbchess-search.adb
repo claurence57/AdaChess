@@ -96,7 +96,8 @@ package body BBChess.Search is
          Depth    : Integer := -1;
          Bound    : Bound_Type := Exact;
          Score    : Score_Type := 0;
-         Move     : Move_Type := Empty_Move;
+         Move     : Packed_Move := 0;
+         Age      : Natural := 0;
       end record;
 
    TT_Size   : constant := 1_048_576;
@@ -104,12 +105,25 @@ package body BBChess.Search is
    type TT_Table is array (0 .. TT_Size - 1) of TT_Entry;
    Transposition_Table : TT_Table;
 
+   -- Current search generation, used to age entries: an entry left over from
+   -- a previous search is replaced before a fresh one.
+   TT_Generation : Natural := 0;
+
    Mate_Threshold : constant Score_Type := Mate_Score - 1000;
 
-   function TT_Index (Position : in Position_Type) return Natural is
+   -- Two entries form a bucket (even index and the next one).
+   function TT_Bucket (Position : in Position_Type) return Natural is
+     (Natural (Position.Key and Bitboard (TT_Mask - 1)));
+
+   function Adjust_Score (S : Score_Type; Ply : Natural) return Score_Type is
    begin
-      return Natural (Position.Key and TT_Mask);
-   end TT_Index;
+      if S >= Mate_Threshold then
+         return S - Ply;
+      elsif S <= -Mate_Threshold then
+         return S + Ply;
+      end if;
+      return S;
+   end Adjust_Score;
 
    procedure Clear_Transposition_Table is
    begin
@@ -118,12 +132,13 @@ package body BBChess.Search is
       for I in Transposition_Table'Range loop
          Transposition_Table (I) :=
            (Hash_Key => 0, Depth => -1, Bound => Exact,
-            Score => 0, Move => Empty_Move);
+            Score => 0, Move => 0, Age => 0);
       end loop;
    end Clear_Transposition_Table;
 
    -- Store a node. Mate scores are normalized by the distance to the root
-   -- so they stay comparable across different depths.
+   -- so they stay comparable across different depths. The two-way bucket
+   -- keeps the deeper of the two entries and replaces stale ones first.
    procedure Store (Position : in Position_Type;
                     Depth     : in Natural;
                     Bound     : in Bound_Type;
@@ -131,8 +146,11 @@ package body BBChess.Search is
                     Move      : in Move_Type;
                     Ply       : in Natural)
    is
-      Idx   : constant Natural := TT_Index (Position);
-      Saved : Score_Type := Score;
+      B      : constant Natural := TT_Bucket (Position);
+      Packed : constant Packed_Move := Pack_Move (Move);
+      Saved  : Score_Type := Score;
+      Slot   : Natural;
+      Repl   : Boolean;
    begin
       if Saved >= Mate_Threshold then
          Saved := Saved + Ply;
@@ -140,26 +158,45 @@ package body BBChess.Search is
          Saved := Saved - Ply;
       end if;
 
-      if Transposition_Table (Idx).Depth < 0
-        or else Depth >= Transposition_Table (Idx).Depth
+      -- Prefer a matching key, then an empty slot, then a stale entry, then
+      -- the shallower of the two.
+      if Transposition_Table (B).Hash_Key = Position.Key then
+         Slot := B;
+      elsif Transposition_Table (B + 1).Hash_Key = Position.Key then
+         Slot := B + 1;
+      elsif Transposition_Table (B).Depth < 0 then
+         Slot := B;
+      elsif Transposition_Table (B + 1).Depth < 0 then
+         Slot := B + 1;
+      elsif Transposition_Table (B).Age < TT_Generation
+        and then Transposition_Table (B + 1).Age >= TT_Generation
       then
-         Transposition_Table (Idx) :=
+         Slot := B;
+      elsif Transposition_Table (B + 1).Age < TT_Generation
+        and then Transposition_Table (B).Age >= TT_Generation
+      then
+         Slot := B + 1;
+      elsif Transposition_Table (B + 1).Depth < Transposition_Table (B).Depth then
+         Slot := B + 1;
+      else
+         Slot := B;
+      end if;
+
+      declare
+         Old : TT_Entry renames Transposition_Table (Slot);
+      begin
+         Repl := Old.Depth < 0
+           or else Old.Hash_Key = Position.Key
+           or else Depth >= Old.Depth
+           or else Old.Age < TT_Generation;
+      end;
+
+      if Repl then
+         Transposition_Table (Slot) :=
            (Hash_Key => Position.Key, Depth => Depth, Bound => Bound,
-            Score => Saved, Move => Move);
+            Score => Saved, Move => Packed, Age => TT_Generation);
       end if;
    end Store;
-
-   function Stored_Score (Position : in Position_Type; Ply : in Natural)
-     return Score_Type is
-      S : Score_Type := Transposition_Table (TT_Index (Position)).Score;
-   begin
-      if S >= Mate_Threshold then
-         S := S - Ply;
-      elsif S <= -Mate_Threshold then
-         S := S + Ply;
-      end if;
-      return S;
-   end Stored_Score;
 
    -------------------------------
    -- Move ordering helpers --
@@ -348,6 +385,7 @@ package body BBChess.Search is
       Reset_Killers;
       Reset_History;
       Game_Key_Count := 0;
+      TT_Generation := 0;
    end Reset_Search;
 
    function Has_Non_Pawn (Position : in Position_Type; Color : in Color_Type)
@@ -585,28 +623,41 @@ package body BBChess.Search is
       end if;
 
       -- Transposition table probe.
+      -- Transposition table probe (two-way bucket).
       declare
-         E : TT_Entry renames Transposition_Table (TT_Index (Position));
+         Bk    : constant Natural := TT_Bucket (Position);
+         Found : Boolean := False;
+         E     : TT_Entry;
       begin
-         if E.Hash_Key = Position.Key and then E.Depth >= Depth then
-            declare
-               S : constant Score_Type := Stored_Score (Position, Ply);
-            begin
-               case E.Bound is
-                  when Exact =>
-                     return S;
-                  when Lower_Bound =>
-                     if S >= B then
-                        return S;
-                     end if;
-                  when Upper_Bound =>
-                     if S <= A then
-                        return S;
-                     end if;
-               end case;
-            end;
+         if Transposition_Table (Bk).Hash_Key = Position.Key then
+            E := Transposition_Table (Bk);
+            Found := True;
+         elsif Transposition_Table (Bk + 1).Hash_Key = Position.Key then
+            E := Transposition_Table (Bk + 1);
+            Found := True;
          end if;
-         Hash_Move := E.Move;
+
+         if Found then
+            if E.Depth >= Depth then
+               declare
+                  S : constant Score_Type := Adjust_Score (E.Score, Ply);
+               begin
+                  case E.Bound is
+                     when Exact =>
+                        return S;
+                     when Lower_Bound =>
+                        if S >= B then
+                           return S;
+                        end if;
+                     when Upper_Bound =>
+                        if S <= A then
+                           return S;
+                        end if;
+                  end case;
+               end;
+            end if;
+            Hash_Move := Unpack_Move (E.Move);
+         end if;
       end;
 
       -- Move generation does not need the Zobrist key: keep it disabled so
@@ -914,6 +965,7 @@ package body BBChess.Search is
       -- moves of a game (it is only reset on "new" via Reset_Search), which
       -- lets the search reuse nodes seen earlier in the game.
       Reset_Killers;
+      TT_Generation := TT_Generation + 1;
 
       for D in 1 .. Depth loop
          -- Aspiration windows: from the second iteration on, search around
@@ -993,6 +1045,7 @@ package body BBChess.Search is
       -- The transposition table persists across the moves of a game (reset
       -- only on "new" via Reset_Search).
       Reset_Killers;
+      TT_Generation := TT_Generation + 1;
 
       Disarm_Time_Limit;
       if Time_Alloc > 0.0 then

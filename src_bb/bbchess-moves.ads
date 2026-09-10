@@ -36,6 +36,13 @@ package BBChess.Moves is
 
    Empty_Move : constant Move_Type := (others => <>);
 
+   -- Compact 32-bit encoding of a move (transposition table storage). The
+   -- layout is: from 6, to 6, piece 4, promotion 4, flag 3. Empty_Move
+   -- packs to 0.
+   type Packed_Move is mod 2 ** 32;
+   function Pack_Move (Move : in Move_Type) return Packed_Move;
+   function Unpack_Move (Value : in Packed_Move) return Move_Type;
+
    type Undo_Info is
       record
          Captured        : Piece_Type := White_Pawn;

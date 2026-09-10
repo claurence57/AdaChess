@@ -263,6 +263,26 @@ package body BBChess.Self_Tests is
 
       Ada.Text_IO.Put_Line ("incremental Zobrist OK");
 
+      -- Packed move round-trip (transposition table encoding).
+      declare
+         P     : Position_Type;
+         Moves : Move_List;
+         Count : Natural;
+         Ok    : Boolean := True;
+      begin
+         Load (P, "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+         Generate_Legal_Moves (P, Moves, Count);
+         for I in 1 .. Count loop
+            if Unpack_Move (Pack_Move (Moves (I))) /= Moves (I) then
+               Ok := False;
+               exit;
+            end if;
+         end loop;
+         Assert (Ok, "packed move round-trip failed");
+      end;
+
+      Ada.Text_IO.Put_Line ("packed move round-trip OK");
+
       -- Illegal FENs must be rejected at load time, in particular a position
       -- that leaves the side not to move in check (a capturable king would
       -- otherwise crash the search when it looks for a missing king).

@@ -36,6 +36,34 @@ package body BBChess.Moves is
       end case;
    end Rook_From;
 
+   ---------------
+   -- Pack_Move --
+   ---------------
+
+   function Pack_Move (Move : in Move_Type) return Packed_Move is
+   begin
+      return Packed_Move (Move.From)
+        + Packed_Move (Move.To) * 2 ** 6
+        + Packed_Move (Piece_Type'Pos (Move.Piece)) * 2 ** 12
+        + Packed_Move (Piece_Type'Pos (Move.Promotion)) * 2 ** 16
+        + Packed_Move (Move_Flag_Type'Pos (Move.Flag)) * 2 ** 20;
+   end Pack_Move;
+
+   -----------------
+   -- Unpack_Move --
+   -----------------
+
+   function Unpack_Move (Value : in Packed_Move) return Move_Type is
+      V : constant Natural := Natural (Value);
+   begin
+      return
+        (From      => Square_Type (V mod 2 ** 6),
+         To        => Square_Type ((V / 2 ** 6) mod 2 ** 6),
+         Piece     => Piece_Type'Val ((V / 2 ** 12) mod 2 ** 4),
+         Promotion => Piece_Type'Val ((V / 2 ** 16) mod 2 ** 4),
+         Flag      => Move_Flag_Type'Val ((V / 2 ** 20) mod 2 ** 3));
+   end Unpack_Move;
+
    -------------
    -- Rook_To --
    -------------
