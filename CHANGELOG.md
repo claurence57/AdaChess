@@ -2,6 +2,42 @@
 
 ## Non publié (développement post bb-1.0)
 
+### Recherche — Phase 0/1 (correctness + élagage)
+
+- **Phase 0 (correctness)** : re-recherche pleine de tout fail-high de la
+  réduction LMR ; history quadratique (`depth²`, plafonnée) avec **malus** des
+  coups calmes qui n'améliorent pas la fenêtre ; nulles terminales (règle des
+  50 coups, matériel insuffisant, répétition dès la 2ᵉ occurrence dans la
+  ligne) ; **mate-distance pruning**.
+- **Phase 1 (élagage)** : LMR en **formule log** (`0.75 + ln(d)·ln(m)/2.25`)
+  avec PVS correct (re-recherche pleine sur fail-high réduit), **late move
+  pruning**, **futility pruning** des coups calmes, **razoring**, **delta
+  pruning** en quiescence.
+- Mesures blitz 1 s+0,1 s : arbre ÷ ~11 à profondeur 9 (7,6 M → 0,67 M nœuds),
+  A/B self-play ≈ **+61 Elo** vs version d'origine, match contre GNU Chess
+  **1-13-6 (≈ -241 Elo)** contre 0-8-2 (≈ -382) avant, soit ≈ **+140 Elo**.
+  `--selftest` vert (perft 1→5 inchangé).
+
+### Recherche — Phase 2 (ordonnancement) : essayée puis revertée
+
+- Tentative : history **persistante entre les coups** (table au niveau paquetage,
+  partagée) + **countermove** + tri SEE des captures.
+- Mesures : self-play non concluant (les trois A/B se contredisaient dans le
+  bruit, ±65 Elo), mais **régression nette contre GNU Chess** en gauntlet
+  (Phase 1 : 8/30 ; Phase 2 : 2/30). Le tri SEE coûtait en plus ~13 % de knps.
+- Décision : **changement annulé**, retour à l'état Phase 1 (bench 668 081
+  nœuds identique). Leçon : à 1 s+0,1 s le self-play entre versions voisines est
+  trop bruité (~47 % de nulles) ; juger sur le match contre GNU, pas sur l'A/B.
+
+### Évaluation — Phase 4a (threats)
+
+- Terme `threats` ajouté à l'évaluation : pions attaquant des pièces ennemies,
+  et pièces mineures (C/F) attaquant tours/dames adverses, bonus proportionnel
+  à la valeur de la victime (`P_Threat_Pawn`, `P_Threat_Minor`). Calcul
+  bitboard par couleur, donc symétrique (`--selftest` vert, départ = 0).
+- Gauntlet vs GNU Chess (30 parties) : Phase 1 ≈ 1,5/30, Phase 4a ≈ 3,5/30 —
+  léger mieux, **non significatif** à cette taille d'échantillon.
+
 ### Performance
 - Harnais `--bench [profondeur]` (8 positions, nœuds/s).
 - Intrinsèques bits (`popcnt`/`bsf`) via shim C + `-mpopcnt -mbmi`, inlining

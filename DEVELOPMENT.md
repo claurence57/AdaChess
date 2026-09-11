@@ -518,3 +518,85 @@ cutechess-cli -engine name=BB cmd="$PWD/bin_bb/adachess_bb" proto=uci \
 **Règle d'or pour la suite** : toute modification (éval, search, movegen) doit garder
 les perft/self-tests verts, et toute nouvelle évaluation doit rester **symétrique**
 (éval de la position initiale = 0).
+
+---
+
+## 9. Phase 0/1 — correctifs de recherche et élagage moderne
+
+Objectif : réduire l'écart avec GNU Chess (~2400-2500 Elo), qui battait BB
+**0-8-2** en blitz 1 s+0,1 s (≈ -382 Elo). Deux étapes menées dans
+`bbchess-search.adb`, validées par `--selftest` (perft 1→5 inchangé) et par A/B
+`cutechess-cli`.
+
+### 9.1 Phase 0 — correction de la recherche
+- **LMR** : un fail-high de la recherche réduite (y compris un beta cutoff) est
+  désormais **re-vérifié à profondeur pleine** ; auparavant la borne réduite
+  pouvait être acceptée telle quelle.
+- **History** : bonus quadratique `depth²` (au lieu de `min(depth², 64)`, quasi
+  inerte) plafonné, et **malus** des coups calmes qui n'améliorent pas alpha.
+- **Nulles terminales** : règle des 50 coups, matériel insuffisant (KvK,
+  K+pièce mineure vs K, fous de même couleur — garde `All_Occ ≤ 4` pour rester
+  quasi gratuit), et répétition comptée comme nulle dès la 2ᵉ occurrence dans la
+  ligne de recherche (3-fold conservé pour l'historique de partie).
+- **Mate-distance pruning**.
+
+Bilan : neutre en A/B (10-9-21, ≈ ±9 Elo non significatif) mais supprime des
+erreurs de recherche réelles ; prérequis pour la suite.
+
+### 9.2 Phase 1 — élagage
+- **LMR log** : `R = 0,75 + ln(depth)·ln(move)/2,25` (table précalculée à
+  l'élaboration), avec PVS correct : fenêtre nulle réduite, puis re-recherche
+  pleine sur fail-high, puis re-recherche pleine fenêtre si le score retombe
+  dans la fenêtre.
+- **Late move pruning** (depth ≤ 3, coups calmes tardifs), **futility pruning**
+  des coups calmes (depth ≤ 2), **razoring** (depth ≤ 2, résolu par
+  quiescence), **delta pruning** en quiescence (capture dont la victime + marge
+  n'atteint pas alpha).
+
+Bilan mesuré (blitz 1 s+0,1 s) :
+- arbre de recherche ÷ ~11 à profondeur 9 (7,6 M → 0,67 M nœuds) ;
+- A/B self-play vs version d'origine : ≈ **+61 Elo** (LOS 94 %) ;
+- vs GNU Chess : **1-13-6** (≈ -241 Elo) contre 0-8-2 (≈ -382) avant, soit
+  ≈ **+140 Elo** — l'écart se resserre mais GNU reste devant.
+
+### 9.3 Phase 2 (ordonnancement) — essayée puis revertée
+
+Tentative d'un lot « ordonnancement » : history **persistante entre les coups**
+(table au niveau paquetage, partagée entre threads), **countermove** (chemin de
+coups `Move_Path` + table `Counter_Move`), et tri **SEE** des captures (bonnes
+captures avant, captures perdantes après les coups calmes).
+
+Résultats :
+- self-play entre versions voisines non concluant : trois A/B (Phase 1 vs
+  Phase 2 avec SEE, avec SEE vs sans SEE, Phase 1 vs Phase 2 sans SEE) donnaient
+  des signes contradictoires, tous dans ±65 Elo (≈ 47 % de nulles) ;
+- **gauntlet contre GNU Chess** (mêmes conditions pour les deux versions,
+  tc 1 s+0,1 s) : Phase 1 **8/30**, Phase 2 **2/30** — régression nette ;
+- le tri SEE coûtait en outre ~13 % de knps pour un arbre légèrement plus gros.
+
+Décision : **tout le lot est annulé**, retour à l'état Phase 1 (bench
+668 081 nœuds, identique). Enseignement méthodologique : à cette cadence, le
+self-play entre versions voisines est trop bruité ; c'est le **match contre GNU**
+qui doit trancher, avec si possible un gauntlet et plusieurs centaines de parties.
+
+### 9.4 Phase 4a — terme d'évaluation « threats »
+
+Ajout dans `bbchess-eval.adb` d'un terme de menaces, calculé par couleur dans
+`Positional_Score` (donc symétrique par construction) :
+- **menaces de pions** : chaque pièce ennemie (hors pion) attaquée par un pion
+  ami rapporte `P_Threat_Pawn × valeur_pièce / 100` ;
+- **menaces de pièces mineures** : un cavalier/fou attaquant une tour ou une
+  dame ennemie rapporte `P_Threat_Minor × valeur_pièce / 100`.
+
+Deux paramètres ajoutés au tableau `Params` (tunables via `--params`). Le
+`--selftest` reste vert (symétrie de `Static`, départ = 0) ; l'arbre de `--bench 9`
+passe de 668 k à 802 k nœuds (le terme change les choix, sans surcoût notable).
+
+Mesure : gauntlet vs GNU (30 parties) Phase 1 ≈ 1,5/30, Phase 4a ≈ 3,5/30 —
+léger mieux mais **dans le bruit**. Limite méthodologique importante : la
+recherche est temporisée et donc non déterministe, ce qui rend les petites
+différences inmesurables sur 20-30 parties ; il faudrait un vrai SPRT sur
+plusieurs centaines de parties pour trancher.
+
+Prochaines étapes : Phase 3 (book Polyglot + Syzygy + gestion
+du temps), Phase 4 (singular extensions, ProbCut, SPSA).
