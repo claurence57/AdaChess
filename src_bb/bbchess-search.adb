@@ -683,7 +683,8 @@ package body BBChess.Search is
    function Negamax (Ctx        : in Context_Access;
                      Position   : in out Position_Type;
                      Depth, Ply : in Natural;
-                     Alpha, Beta : in Score_Type) return Score_Type
+                     Alpha, Beta : in Score_Type;
+                     Excluded   : in Move_Type := Empty_Move) return Score_Type
    is
       A           : Score_Type := Alpha;
       B           : Score_Type := Beta;
@@ -696,6 +697,11 @@ package body BBChess.Search is
       Child_Depth : Natural := 0;
       Eval_Now    : Score_Type := 0;
       Have_Eval   : Boolean := False;
+      TT_Score    : Score_Type := 0;
+      TT_Bound    : Bound_Type := Exact;
+      TT_Depth    : Integer := -1;
+      Have_TT     : Boolean := False;
+      Singular_Ext : Natural := 0;
    begin
       Poll_Time (Ctx);
 
@@ -753,25 +759,28 @@ package body BBChess.Search is
          end if;
 
          if Found then
-            if E.Depth >= Depth then
-               declare
-                  S : constant Score_Type := Adjust_Score (E.Score, Ply);
-               begin
-                  case E.Bound is
-                     when Exact =>
-                        return S;
-                     when Lower_Bound =>
-                        if S >= B then
-                           return S;
-                        end if;
-                     when Upper_Bound =>
-                        if S <= A then
-                           return S;
-                        end if;
-                  end case;
-               end;
+            TT_Score := Adjust_Score (E.Score, Ply);
+            TT_Bound := E.Bound;
+            TT_Depth := E.Depth;
+            Have_TT  := True;
+            if E.Depth >= Depth and then Excluded = Empty_Move then
+               case E.Bound is
+                  when Exact =>
+                     return TT_Score;
+                  when Lower_Bound =>
+                     if TT_Score >= B then
+                        return TT_Score;
+                     end if;
+                  when Upper_Bound =>
+                     if TT_Score <= A then
+                        return TT_Score;
+                     end if;
+               end case;
             end if;
             Hash_Move := Unpack_Move (E.Move);
+            if Hash_Move = Excluded then
+               Hash_Move := Empty_Move;
+            end if;
          end if;
       end;
 
@@ -848,6 +857,28 @@ package body BBChess.Search is
          end;
       end if;
 
+      -- Singular extension: when the transposition-table move is clearly
+      -- better than every alternative at reduced depth, search it one ply
+      -- deeper. The probe searches this position with the reference move
+      -- excluded; Excluded also disables the TT cutoff and the TT store.
+      if Depth >= 8 and then Excluded = Empty_Move
+        and then Hash_Move /= Empty_Move and then not In_Check
+        and then Have_TT and then TT_Depth >= Depth - 3
+        and then TT_Bound /= Upper_Bound
+      then
+         declare
+            Sing_Beta  : constant Score_Type :=
+              TT_Score - 2 * Score_Type (Depth);
+            Sing_Score : constant Score_Type :=
+              Negamax (Ctx, Position, (Depth - 1) / 2, Ply,
+                       Sing_Beta - 1, Sing_Beta, Excluded => Hash_Move);
+         begin
+            if Sing_Score < Sing_Beta then
+               Singular_Ext := 1;
+            end if;
+         end;
+      end if;
+
       -- Move ordering, then PVS over the children.
       declare
          Ord : array (1 .. 256) of Score_Type;
@@ -884,7 +915,13 @@ package body BBChess.Search is
                Score   : Score_Type;
                Tactical : constant Boolean := Is_Tactical (Position, Moves (I));
                Reduction : Natural := 0;
+               Move_Depth : Natural := Child_Depth;
             begin
+               -- In a singular-extension probe the reference move is excluded.
+               if Moves (I) = Excluded then
+                  goto Next_Move;
+               end if;
+
                -- Late move pruning: at low depth the late quiet moves are
                -- simply skipped (they are ordered last and almost never
                -- improve on the already searched moves).
@@ -918,20 +955,25 @@ package body BBChess.Search is
                   end if;
                end if;
 
+               -- Singular hash move: search it one ply deeper.
+               if Moves (I) = Hash_Move and then Singular_Ext > 0 then
+                  Move_Depth := Child_Depth + Singular_Ext;
+               end if;
+
                Make_Move (Position, Moves (I), Undo);
 
                if I = 1 then
-                  Score := -Negamax (Ctx, Position, Child_Depth, Ply + 1, -B, -A);
+                  Score := -Negamax (Ctx, Position, Move_Depth, Ply + 1, -B, -A);
                else
-                  Score := -Negamax (Ctx, Position, Child_Depth - Reduction,
+                  Score := -Negamax (Ctx, Position, Move_Depth - Reduction,
                                      Ply + 1, -A - 1, -A);
                   if Reduction > 0 and then Score > A then
                      -- Verify a reduced fail-high at full depth.
-                     Score := -Negamax (Ctx, Position, Child_Depth, Ply + 1,
+                     Score := -Negamax (Ctx, Position, Move_Depth, Ply + 1,
                                         -A - 1, -A);
                   end if;
                   if Score > A and then Score < B then
-                     Score := -Negamax (Ctx, Position, Child_Depth, Ply + 1,
+                     Score := -Negamax (Ctx, Position, Move_Depth, Ply + 1,
                                         -B, -A);
                   end if;
                end if;
@@ -960,7 +1002,10 @@ package body BBChess.Search is
                      Bump_History (Ctx, Position.Side, Moves (I).From,
                                    Moves (I).To, History_Bonus (Depth));
                   end if;
-                  Store (Position, Depth, Lower_Bound, Score, Best_Move_Here, Ply);
+                  if Excluded = Empty_Move then
+                     Store (Position, Depth, Lower_Bound, Score,
+                            Best_Move_Here, Ply);
+                  end if;
                   return Score;
                end if;
                if Score > A then
@@ -982,7 +1027,9 @@ package body BBChess.Search is
          else
             Bound := Exact;
          end if;
-         Store (Position, Depth, Bound, A, Best_Move_Here, Ply);
+         if Excluded = Empty_Move then
+            Store (Position, Depth, Bound, A, Best_Move_Here, Ply);
+         end if;
       end;
 
       return A;
