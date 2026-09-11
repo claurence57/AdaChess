@@ -30,6 +30,8 @@ use BBChess.Eval;
 with BBChess.See;
 use BBChess.See;
 
+with BBChess.Syzygy;
+
 with BBChess.Notation;
 use BBChess.Notation;
 
@@ -727,6 +729,28 @@ package body BBChess.Search is
          return 0;
       end if;
 
+      -- Syzygy tablebase: an exact WDL result, when the loaded tables cover
+      -- this material. Only positions without castling rights and with a zero
+      -- halfmove clock are probed (Fathom rejects the others).
+      if BBChess.Syzygy.Enabled
+        and then Popcount (Position.All_Occ) <= BBChess.Syzygy.Largest
+      then
+         declare
+            W : constant Integer := BBChess.Syzygy.Probe_WDL (Position);
+         begin
+            case W is
+               when 4 =>                     -- TB_WIN
+                  return BBChess.Syzygy.TB_Win - Ply;
+               when 0 =>                     -- TB_LOSS
+                  return -(BBChess.Syzygy.TB_Win - Ply);
+               when 1 | 2 | 3 =>             -- draw / blessed / cursed
+                  return 0;
+               when others =>
+                  null;
+            end case;
+         end;
+      end if;
+
       -- Mate-distance pruning: no node can score better than a mate found
       -- at the current ply, nor worse than being mated right now.
       declare
@@ -1204,7 +1228,8 @@ package body BBChess.Search is
                                  Ctx.Nodes_Count - Nodes_Base, Best);
             end if;
 
-            exit when Abs (Best_Score) >= Mate_Score - 200;
+            exit when Abs (Best_Score) >= Mate_Score - 200
+              or else Abs (Best_Score) >= BBChess.Syzygy.TB_Win - 100;
          end loop;
       exception
          when Search_Interrupted =>

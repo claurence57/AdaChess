@@ -57,6 +57,8 @@ with BBChess.Self_Tests;
 
 with BBChess.Polyglot;
 
+with BBChess.Syzygy;
+
 procedure AdaChess_BB is
 
    Input_Line : String (1 .. 8192);
@@ -621,6 +623,19 @@ begin
       end if;
    end loop;
 
+   -- Optional Syzygy tablebase directory (playing modes).
+   for I in 1 .. Ada.Command_Line.Argument_Count loop
+      if Ada.Command_Line.Argument (I) = "--syzygy"
+        and then I < Ada.Command_Line.Argument_Count
+      then
+         declare
+            Ok : Boolean;
+         begin
+            BBChess.Syzygy.Init (Ada.Command_Line.Argument (I + 1), Ok);
+         end;
+      end if;
+   end loop;
+
    -- Optional number of search threads (Lazy SMP).
    for I in 1 .. Ada.Command_Line.Argument_Count loop
       if Ada.Command_Line.Argument (I) = "--threads"
@@ -722,6 +737,8 @@ begin
                ("option name OwnBook type check default true");
              Ada.Text_IO.Put_Line
                ("option name BookFile type string default books/book.bin");
+             Ada.Text_IO.Put_Line
+               ("option name SyzygyPath type string default <empty>");
              Ada.Text_IO.Put_Line ("uciok");
              Ada.Text_IO.Flush;
 
@@ -764,6 +781,14 @@ begin
                       Ok : Boolean;
                    begin
                       BBChess.Polyglot.Open_Book (Token (Par, 4), Ok);
+                   end;
+                elsif Token (Par, 2) = "SyzygyPath"
+                  and then Token (Par, 3) = "value"
+                then
+                   declare
+                      Ok : Boolean;
+                   begin
+                      BBChess.Syzygy.Init (Token (Par, 4), Ok);
                    end;
                 end if;
              end if;
