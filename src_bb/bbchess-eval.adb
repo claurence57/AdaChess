@@ -255,7 +255,8 @@ package body BBChess.Eval is
       P_Doubled_Op, P_Doubled_Eg, P_Isolated_Op, P_Isolated_Eg,
       P_Protected_Op, P_Protected_Eg, P_Outside_Op, P_Outside_Eg,
       P_Shield1, P_Shield2, P_Shield3, P_OpenFile, P_Storm,
-      P_Atk_N, P_Atk_B, P_Atk_R, P_Atk_Q, P_Exposed);
+      P_Atk_N, P_Atk_B, P_Atk_R, P_Atk_Q, P_Exposed,
+      P_Threat_Pawn, P_Threat_Minor);
 
    type Param_Array is array (Param_Id) of Integer;
    Params : Param_Array :=
@@ -295,8 +296,10 @@ package body BBChess.Eval is
       P_Atk_N           => 10,
       P_Atk_B           => 10,
       P_Atk_R           => 16,
-      P_Atk_Q           => 24,
-      P_Exposed         => 28);
+     P_Atk_Q           => 24,
+     P_Exposed         => 28,
+     P_Threat_Pawn     => 15,
+     P_Threat_Minor    => 10);
 
    function Piece_Value (Kind : in Kind_Type) return Score_Type is
    begin
@@ -546,6 +549,8 @@ package body BBChess.Eval is
    King_Attack_Rook      : Score_Type renames Params (P_Atk_R);
    King_Attack_Queen     : Score_Type renames Params (P_Atk_Q);
    Exposed_King          : Score_Type renames Params (P_Exposed);
+   Threat_Pawn           : Score_Type renames Params (P_Threat_Pawn);
+   Threat_Minor          : Score_Type renames Params (P_Threat_Minor);
    King_Safety_Min_Phase : constant Natural := 20;
 
    --------------------
@@ -695,6 +700,11 @@ package body BBChess.Eval is
       Free     : constant Bitboard := not Own;
       Own_Pawns   : constant Bitboard := Position.Pieces (Make (Color, Pawn));
       Enemy_Pawns : constant Bitboard := Position.Pieces (Make (Enemy, Pawn));
+      Enemy_Non_Pawn : constant Bitboard :=
+        Position.Pieces (Make (Enemy, Knight))
+        or Position.Pieces (Make (Enemy, Bishop))
+        or Position.Pieces (Make (Enemy, Rook))
+        or Position.Pieces (Make (Enemy, Queen));
       Enemy_King  : constant Square_Type :=
         Lowest_Bit (Position.Pieces (Make (Enemy, King)));
       Result   : Tapered_Score_Type := (Opening => 0, End_Game => 0);
@@ -852,6 +862,66 @@ package body BBChess.Eval is
                end if;
             end;
             PB := PB and (PB - 1);
+         end loop;
+      end;
+
+      -- Threats: pawns attacking enemy pieces, and minor pieces attacking
+      -- enemy rooks/queens. Computed per color and mirrored, so symmetric.
+      declare
+         P_Att : Bitboard := 0;
+         PB    : Bitboard := Own_Pawns;
+      begin
+         while PB /= 0 loop
+            P_Att := P_Att or Pawn_Attacks (Color, Lowest_Bit (PB));
+            PB := PB and (PB - 1);
+         end loop;
+         declare
+            Hit : Bitboard := P_Att and Enemy_Non_Pawn;
+         begin
+            while Hit /= 0 loop
+               declare
+                  Sq : constant Square_Type := Lowest_Bit (Hit);
+                  Pc : Piece_Type;
+               begin
+                  if Piece_At (Position, Sq, Pc) then
+                     Result := Result +
+                       Both (Threat_Pawn * Piece_Value (Kind (Pc)) / 100);
+                  end if;
+               end;
+               Hit := Hit and (Hit - 1);
+            end loop;
+         end;
+      end;
+
+      -- Minor pieces attacking enemy rooks or queens.
+      declare
+         Majors : constant Bitboard :=
+           Position.Pieces (Make (Enemy, Rook))
+           or Position.Pieces (Make (Enemy, Queen));
+      begin
+         for K in Knight .. Bishop loop
+            B := Position.Pieces (Make (Color, K));
+            while B /= 0 loop
+               declare
+                  Sq  : constant Square_Type := Lowest_Bit (B);
+                  Hit : Bitboard := Piece_Attacks (K, Sq, Occ) and Majors;
+               begin
+                  while Hit /= 0 loop
+                     declare
+                        Sq2 : constant Square_Type := Lowest_Bit (Hit);
+                        Pc  : Piece_Type;
+                     begin
+                        if Piece_At (Position, Sq2, Pc) then
+                           Result := Result +
+                             Both (Threat_Minor
+                                   * Piece_Value (Kind (Pc)) / 100);
+                        end if;
+                     end;
+                     Hit := Hit and (Hit - 1);
+                  end loop;
+               end;
+               B := B and (B - 1);
+            end loop;
          end loop;
       end;
 
