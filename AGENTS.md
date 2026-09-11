@@ -84,3 +84,6 @@ interrupt an in-progress `go`.
   are cross-checked in `--selftest`.
 - Log notable engine changes in `DEVELOPMENT.md` (French, sectioned) and
   `CHANGELOG.md`, matching the existing style.
+- The search Phase 0/1, the eval `threats` term and the Polyglot opening book
+  (`DEVELOPMENT.md` §9-11) were developed with the AI agent **Sisyphus**
+  (OhMyOpenCode) under **OpenCode**, model `deepseek/deepseek-v4-flash`.

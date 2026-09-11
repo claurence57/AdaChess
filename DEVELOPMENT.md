@@ -638,3 +638,23 @@ pièce noire) ; l'inverser donnait une clé fausse (détecté par le cross-check
 
 Prochaines étapes : Phase 4b (singular extensions, ProbCut, SPSA), Syzygy, et
 mesurer le book sur un plus gros échantillon / une suite d'ouvertures.
+
+---
+
+## 11. Développement assisté par IA
+
+Les évolutions décrites aux **sections 9 et 10** (Phase 0/1 de la recherche,
+terme d'évaluation `threats`, et livre d'ouvertures Polyglot) ont été développées
+avec l'assistance d'un agent IA :
+
+- **Agent** : *Sisyphus* — projet **OhMyOpenCode** ;
+- **Modèle** : `deepseek/deepseek-v4-flash` ;
+- **Environnement** : **OpenCode**.
+
+Méthode : l'humain fixe l'objectif et tranche les choix structurants (format du
+book, source des données, priorités) ; l'agent implémente, compile, exécute les
+self-tests et les matchs `cutechess-cli`, puis documente. Chaque étape est
+validée par `--selftest` (perft inchangé) et par des matchs. Les expériences
+négatives (Phase 2 d'ordonnancement, tuning Texel) sont **conservées** dans ce
+document plutôt que masquées, et les mesures sont données avec leur incertitude
+(échantillons bruités — voir §9.3).
