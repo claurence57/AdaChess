@@ -129,46 +129,18 @@ package body BBChess.Eval is
       return Own and not Front_Blockers (Enemy, Color);
    end Passed_Pawns;
 
-   -- True when a friendly pawn of Color defends Square. A pawn defends the
-   -- two squares diagonally in front of it, so the defenders of Square stand
-   -- one rank behind it on the adjacent files (Square - 9 / - 7 for White,
-   -- Square + 7 / + 9 for Black).
+   -- True when a friendly pawn of Color defends Square. A pawn of Color
+   -- standing on X attacks Square exactly when X is a square from which a
+   -- pawn of the opposite color on Square would attack, i.e. the reverse
+   -- attack relation Pawn_Attacks (Opposite (Color), Square).
    function Defended_By_Pawn (Position : in Position_Type;
                               Color    : in Color_Type;
                               Square   : in Square_Type) return Boolean is
-      Def1, Def2 : Integer;
-      F1, F2     : Integer;
    begin
-      if Color = White then
-         Def1 := Integer (Square) - 9;
-         Def2 := Integer (Square) - 7;
-      else
-         Def1 := Integer (Square) + 7;
-         Def2 := Integer (Square) + 9;
-      end if;
-      if Def1 not in Square_Type then
-         return Def2 in Square_Type
-           and then (Position.Pieces (Make (Color, Pawn))
-                     and Bit (Square_Type (Def2))) /= 0;
-      end if;
-      F1 := Integer (File_Of (Square_Type (Def1)));
-      F2 := Integer (File_Of (Square_Type (Def2)));
-      -- Def1 / Def2 are on the adjacent files only when they did not wrap
-      -- around a rank edge: check the file differs by exactly 1.
-      if abs (F1 - Integer (File_Of (Square))) = 1 then
-         if (Position.Pieces (Make (Color, Pawn))
-             and Bit (Square_Type (Def1))) /= 0 then
-            return True;
-         end if;
-      end if;
-      if Def2 in Square_Type
-        and then abs (F2 - Integer (File_Of (Square))) = 1
-      then
-         return (Position.Pieces (Make (Color, Pawn))
-                 and Bit (Square_Type (Def2))) /= 0;
-      end if;
-      return False;
+      return (Pawn_Attacks (Opposite (Color), Square)
+              and Position.Pieces (Make (Color, Pawn))) /= 0;
    end Defended_By_Pawn;
+   pragma Inline (Defended_By_Pawn);
 
    -- Rows: 0 = own back rank, 7 = just before the opponent's back rank.
    Pawn_PST : constant PST_Table :=
@@ -312,6 +284,7 @@ package body BBChess.Eval is
          when King   => return 0;
       end case;
    end Piece_Value;
+   pragma Inline (Piece_Value);
 
    function PST (Kind : in Kind_Type; Color : in Color_Type;
                  Square : in Square_Type) return Score_Type is
@@ -333,6 +306,7 @@ package body BBChess.Eval is
          when King   => return King_PST (Row, File_Idx);
       end case;
    end PST;
+   pragma Inline (PST);
 
    -- Flat (piece, square) table combining material and PST, precomputed at
    -- elaboration so the hot material loop is a single lookup per piece.
@@ -435,6 +409,7 @@ package body BBChess.Eval is
          return 7 - Rank_Of (Sq);
       end if;
    end Own_Row;
+   pragma Inline (Own_Row);
 
    -- Pseudo-legal attacks of a piece (sliders take the occupancy into
    -- account; leapers do not need it).
@@ -465,15 +440,18 @@ package body BBChess.Eval is
 
    function Both (Value : in Score_Type) return Tapered_Score_Type is
      ((Value, Value));
+   pragma Inline (Both);
 
    function "+" (L, R : in Tapered_Score_Type) return Tapered_Score_Type is
      ((L.Opening + R.Opening, L.End_Game + R.End_Game));
+   pragma Inline ("+");
 
    function Blend (Score : in Tapered_Score_Type; Phase : in Natural)
      return Score_Type is
    begin
       return (Score.Opening * Phase + Score.End_Game * (100 - Phase)) / 100;
    end Blend;
+   pragma Inline (Blend);
 
    -- Game phase from the remaining material (0 = pure endgame,
    -- 100 = full opening). Mirrors the classic phase count.
