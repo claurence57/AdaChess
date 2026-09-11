@@ -61,6 +61,23 @@
   (≈ +30 Elo, non significatif à 30 parties) ; l'ouverture `1.Nc3` disparaît
   au profit de e4/d4/Nf3/c4.
 
+### Évaluation — optimisations mesurées (prompt `/tmp/kk`)
+
+- **B1** : `Defended_By_Pawn` remplacé par un lookup inversé unique
+  (`Pawn_Attacks (Opposite (Color), Square) and pions amis`) — simplification à
+  sémantique identique, **conservée**.
+- **B6** : `pragma Inline` sur les helpers chauds de l'éval (`Both`, `"+"`,
+  `Blend`, `PST`, `Piece_Value`, `Own_Row`, `Defended_By_Pawn`) pour activer
+  l'inlining frontend (`-gnatN`) — **conservé** (neutre au bench, sans coût).
+- **B3** (phase incrémentale) : implémentée et cross-checkée par self-test, mais
+  **revertée** — gain non mesurable (bench 11 : médianes 1,80 s avant vs 1,81 s
+  après). Le profil `-pg` surestimait `popcount` (instruction unique en build
+  optimisé) ; le champ ajouté à `Position`/`Undo` n'était pas justifié.
+- Profilage : `perf` bloqué (`perf_event_paranoid=4`), repli `gprof` via `-pg`
+  (build distordu ×4,7) → `positional_score` ≈ 20 %, `order` ≈ 10 %.
+- Bilan : aucune optimisation d'éval du prompt n'apporte de gain mesurable ;
+  l'axe utile reste la qualité de recherche.
+
 ### Performance
 - Harnais `--bench [profondeur]` (8 positions, nœuds/s).
 - Intrinsèques bits (`popcnt`/`bsf`) via shim C + `-mpopcnt -mbmi`, inlining

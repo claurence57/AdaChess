@@ -658,3 +658,46 @@ validée par `--selftest` (perft inchangé) et par des matchs. Les expériences
 négatives (Phase 2 d'ordonnancement, tuning Texel) sont **conservées** dans ce
 document plutôt que masquées, et les mesures sont données avec leur incertitude
 (échantillons bruités — voir §9.3).
+
+---
+
+## 12. Optimisation de l'évaluation (prompt `/tmp/kk`)
+
+Tentative d'optimisation CPU de `BBChess.Eval.Static` (sans changer les scores),
+à partir d'un prompt d'implémentation. Étapes 0 à 3 exécutées.
+
+**Profilage (étape 0).** `perf` indisponible (`perf_event_paranoid = 4`) ;
+repli `gprof` via un build `release` + `-pg` (distordu : 2,6 s contre 0,56 s au
+`--bench 9`, donc ×4,7). Postes : `positional_score` ≈ **20 %** (appelé 1,07 M
+fois = 2×/`Static`), `order` ≈ 10 %, `popcount` ≈ 10 %, attaques ≈ 12 %. Le
+`-pg` surestime les petites fonctions appelées des millions de fois.
+
+**B1 — `Defended_By_Pawn` en un lookup (conservé).** Remplacé par
+`(Pawn_Attacks (Opposite (Color), Square) and Position.Pieces (Make (Color,
+Pawn))) /= 0` (relation d'attaque inverse). Sémantique identique (nœuds du bench
+inchangés), ~30 lignes en moins.
+
+**B3 — phase incrémentale (revertée).** Implémentée (champ `Phase` dans
+`Position`/`Undo`, maintenu par Make/Unmake, cross-check self-test
+`Phase = Game_Phase`), mais **gain non mesurable** : bench 11 interleavé,
+médianes 1,80 s (avant) vs 1,81 s (après), dans le bruit. En build optimisé,
+les 8 `Popcount` de `Game_Phase` sont des instructions uniques (~4 M cycles sur
+~1,8 G, soit ~0,2 %) ; le champ ajouté alourdit les copies de `Position`. Le
+profil `-pg` avait surévalué ce poste. **Tout est reverté.**
+
+**B6 — `pragma Inline` sur les helpers chauds (conservé).** `Both`, `"+"`,
+`Blend`, `PST`, `Piece_Value`, `Own_Row`, `Defended_By_Pawn`. `-gnatN` n'inline
+que les sous-programmes marqués `pragma Inline` : sans marquage il ne servait à
+rien pour l'éval. Piège : marquer `Piece_Attacks` casse la compilation (son
+`case` inliné dépasse le sous-type `Knight .. Bishop` du terme `threats`) →
+pragma retiré. Effet mesuré : neutre, conservé car sans coût.
+
+**Écarté / non fait** : B2 (miroir `Front_Blockers` — `Front_Blockers` n'est que
+7 shifts, miroir non évidemment plus rapide), B4 (fusion des deux
+`Positional_Score` — refactor lourd, gain incertain), B5 (pions en un passage —
+marginal), C1 (table d'attaques roi — invasif). A1 (flags `-gnatN` off + LTO)
+non tenté : retirer `-gnatN` contredit le ×3,8 mesuré en §7ter.
+
+**Conclusion** : aucune optimisation d'éval du prompt n'apporte de gain
+mesurable ; le levier reste la **qualité de recherche** (Phase 4b : singular,
+ProbCut, SPSA ; puis Syzygy).
