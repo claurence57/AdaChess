@@ -725,3 +725,37 @@ cherché un ply plus profond.
   à cette cadence — à re-mesurer en SPRT sur plusieurs centaines de parties.
 
 Prochaine étape : Syzygy.
+
+---
+
+## 14. Tablebases Syzygy
+
+Probe de fin de partie via **Fathom** (bibliothèque C, licence **MIT**),
+vendue dans `src_bb/fathom/` (`tbprobe.c`, `tbchess.inc` inclus par
+`tbprobe.c`, `tbconfig.h`, `stdendian.h`, plus le wrapper aplati
+`bbchess-tbwrap.c`). Le wrapper expose `bb_tb_init`, `bb_tb_largest`,
+`bb_tb_wdl` au binding Ada `BBChess.Syzygy`.
+
+- **Binding** (`bbchess-syzygy.ads/.adb`) : `Init (chemin)`, `Largest`,
+  `Probe_WDL` (convertit la `Position` en bitboards Fathom). Le probe WDL est
+  refusé s'il subsiste des **droits de roque** ; le halfmove est **ignoré** (le
+  WDL suppose `rule50 = 0` — le DTZ serait nécessaire pour respecter la règle
+  des 50 coups).
+- **Recherche** : dans `Negamax`, si des tables couvrent le matériel
+  (`Popcount (All_Occ) ≤ Largest`), le WDL exact est renvoyé : gain →
+  `TB_Win − Ply`, perte → `−(TB_Win − Ply)`, nulle/blessed/cursed → 0.
+  L'itération s'arrête dès qu'un score TB est atteint.
+- **Driver** : `--syzygy <dossier>` (modes de jeu) et UCI
+  `setoption name SyzygyPath value <dossier>`.
+- **Validation** : `--selftest` vert ; avec les tables 3-pièces
+  (KQvK/KRvK/KPvK, miroir `sesse.net`), un KQvK blanc renvoie **19999** dès la
+  profondeur 2 et s'arrête. Sans tables, l'intégration est **inerte**
+  (`Largest = 0`, aucun surcoût au bench).
+- **Limite** : pas de probe **DTZ** au root → dans une finale gagnée, le moteur
+  peut « tourner » sans progresser (nulle par la règle des 50 coups). À ajouter.
+
+Piège de build : `tbchess.c` est destiné à être **inclus** par `tbprobe.c`
+(unity build), pas compilé seul → renommé `tbchess.inc` (sinon gprbuild le
+compile séparément et échoue).
+
+Licence : Fathom est **MIT** (compatible GPLv3), voir `src_bb/fathom/LICENSE`.

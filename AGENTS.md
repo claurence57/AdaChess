@@ -59,9 +59,9 @@ scripts/vs_gnuchess.sh 30+1 12 7  # vs GNU Chess (UCI)
 ## BB command-line modes
 
 `--selftest`, `--bench [depth]` (default 8), `--threads N` (Lazy SMP, max 16),
-`--book <file>`, `--dump-params`, `--eval-fens <file>`, `--params <file>`.
-`--params`/`--threads` apply to every mode; `--book` only to the playing modes
-(the book is not probed by `--selftest`/`--bench`/`--eval-fens`).
+`--book <file>`, `--syzygy <dir>`, `--dump-params`, `--eval-fens <file>`,
+`--params <file>`. `--params`/`--threads` apply to every mode; `--book`/`--syzygy`
+only to the playing modes (not probed by `--selftest`/`--bench`/`--eval-fens`).
 
 BB speaks **both** XBoard and UCI (protocol selected by the `uci` command).
 `go` exists in both protocols. UCI search is synchronous — `stop` does not
@@ -82,6 +82,9 @@ interrupt an in-progress `go`.
   `scripts/fetch_book.sh` → `books/book.bin` (gitignored). Override with
   `--book <file>` or UCI `setoption name BookFile value <path>`. Polyglot keys
   are cross-checked in `--selftest`.
+- Endgame tablebases: Syzygy via **vendored Fathom** (`src_bb/fathom/`, MIT).
+  Enable with `--syzygy <dir>` or UCI `SyzygyPath`; inert without `.rtbw`/`.rtbz`
+  files. WDL is probed in the search (no castling rights); no DTZ yet.
 - Log notable engine changes in `DEVELOPMENT.md` (French, sectioned) and
   `CHANGELOG.md`, matching the existing style.
 - The search Phase 0/1, the eval `threats` term and the Polyglot opening book

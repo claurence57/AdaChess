@@ -61,6 +61,17 @@
   (≈ +30 Elo, non significatif à 30 parties) ; l'ouverture `1.Nc3` disparaît
   au profit de e4/d4/Nf3/c4.
 
+### Finales — tablebases Syzygy (Fathom)
+
+- Fathom (C, licence MIT) vendu dans `src_bb/fathom/` + wrapper
+  `bbchess-tbwrap.c` + binding Ada `BBChess.Syzygy`.
+- Probe WDL exact dans `Negamax` (matériel couvert, sans droits de roque) :
+  `TB_Win`/`TB_Loss`/nulle, avec sortie anticipée de l'itération.
+- Driver : `--syzygy <dossier>` et UCI `setoption name SyzygyPath`.
+- Testé avec les tables 3-pièces : KQvK blanc → score **19999** dès depth 2.
+  Inerte sans fichiers `.rtbw`/`.rtbz` (aucun surcoût au bench).
+- Limite : pas de DTZ au root (progression en finale gagnée).
+
 ### Recherche — singular extensions
 
 - Extension singulière dans `Negamax` : paramètre `Excluded` (défaut
