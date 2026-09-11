@@ -19,6 +19,8 @@ use Ada.Real_Time;
 
 with Ada.Text_IO;
 
+with Ada.Numerics.Elementary_Functions;
+
 with BBChess.Hash;
 use BBChess.Hash;
 
@@ -42,6 +44,10 @@ package body BBChess.Search is
    -- negligible while still bounding the overshoot.
    Check_Interval : constant := 1024;
    Max_Ply        : constant := 128;
+
+   -- Delta pruning margin (quiescence): a capture whose victim plus this
+   -- margin cannot reach alpha is not searched.
+   Delta_Margin : constant Score_Type := 200;
 
    ---------------
    -- TT helpers --
@@ -264,14 +270,17 @@ package body BBChess.Search is
       return (Color_Board (Position, Opposite (Position.Side)) and Bit (Move.To)) /= 0;
    end Is_Tactical;
 
-   History_Max : constant Score_Type := 850_000;
+   History_Max : constant Score_Type := 16_384;
 
    -- History bonus of a quiet move that produced a beta cutoff at Depth.
+   -- Quadratic in the depth so that deep cutoffs dominate, and capped so a
+   -- single update can never saturate the table (it stays far below the
+   -- killer and capture scores used by Order).
    function History_Bonus (Depth : in Natural) return Score_Type is
-      B : Score_Type := Score_Type (Depth) * Score_Type (Depth);
+      B : constant Score_Type := Score_Type (Depth) * Score_Type (Depth);
    begin
-      if B > 64 then
-         B := 64;
+      if B > 1024 then
+         return 1024;
       end if;
       return B;
    end History_Bonus;
@@ -280,10 +289,14 @@ package body BBChess.Search is
                            Side       : in Color_Type;
                            From, To   : in Square_Type;
                            Bonus      : in Score_Type) is
+      V : Score_Type := Ctx.History (Side, From, To) + Bonus;
    begin
-      if Ctx.History (Side, From, To) <= History_Max - Bonus then
-         Ctx.History (Side, From, To) := Ctx.History (Side, From, To) + Bonus;
+      if V > History_Max then
+         V := History_Max;
+      elsif V < -History_Max then
+         V := -History_Max;
       end if;
+      Ctx.History (Side, From, To) := V;
    end Bump_History;
 
    -- Kind of the piece captured by Move (pawns for en-passant; the moving
@@ -381,8 +394,10 @@ package body BBChess.Search is
       Ada.Text_IO.Flush;
    end Report_Iteration;
 
-   -- True when Position has already occurred twice before on the current
-   -- line: once is not enough (that would only be the second visit). The
+   -- True when Position has already occurred on the current line. A single
+   -- earlier occurrence among the ancestors of the node is enough (the side
+   -- to move can force the repetition); otherwise the position must have
+   -- been seen twice in the game history for a threefold repetition. The
    -- occurrences are looked up in the game history and among the ancestors
    -- of the current node (plies 1 .. Ply-1, the root being the last game
    -- key). Ply is the depth of the node below the search root.
@@ -393,7 +408,7 @@ package body BBChess.Search is
       -- A position can only repeat since the last irreversible move (pawn
       -- move or capture), so only the last Halfmove plies have to be scanned.
       Window : constant Natural := Position.Halfmove;
-      N      : Natural := 0;
+      G      : Natural := 0;   -- occurrences already present in the game
       Start  : Natural;
       Lo     : Natural;
    begin
@@ -403,23 +418,22 @@ package body BBChess.Search is
                    else 0);
          for I in Start .. Ctx.Game_Key_Count - 1 loop
             if Ctx.Game_Keys (I) = Position.Key then
-               N := N + 1;
-               exit when N >= 2;
+               G := G + 1;
+               exit when G >= 2;
             end if;
          end loop;
       end if;
 
-      if N < 2 and then Ply > 1 then
+      if G < 2 and then Ply > 1 then
          Lo := (if Ply > Window then Ply - Window else 1);
-         for P in Lo .. Ply - 1 loop
-            if Ctx.Search_Path (P) = Position.Key then
-               N := N + 1;
-               exit when N >= 2;
+         for Q in Lo .. Ply - 1 loop
+            if Ctx.Search_Path (Q) = Position.Key then
+               return True;   -- repeated within the current search line
             end if;
          end loop;
       end if;
 
-      return N >= 2;
+      return G >= 2;
    end Is_Repetition;
 
    procedure Reset_Search is
@@ -439,6 +453,52 @@ package body BBChess.Search is
               or Position.Pieces (Make (Color, Rook))
               or Position.Pieces (Make (Color, Queen))) /= 0;
    end Has_Non_Pawn;
+
+   -- True for dead positions: king vs king, king + lone minor vs king, and
+   -- king + bishop vs king + bishop with both bishops on the same color
+   -- complex. The occupancy guard keeps the expensive part off the hot path:
+   -- no dead position has more than four men on the board.
+   function Insufficient_Material (Position : in Position_Type) return Boolean is
+      W_Minor : Bitboard;
+      B_Minor : Bitboard;
+   begin
+      if Popcount (Position.All_Occ) > 4 then
+         return False;
+      end if;
+
+      if (Position.Pieces (White_Pawn) or Position.Pieces (Black_Pawn)
+          or Position.Pieces (White_Rook) or Position.Pieces (Black_Rook)
+          or Position.Pieces (White_Queen) or Position.Pieces (Black_Queen)) /= 0
+      then
+         return False;
+      end if;
+
+      W_Minor := Position.Pieces (White_Knight)
+        or Position.Pieces (White_Bishop);
+      B_Minor := Position.Pieces (Black_Knight)
+        or Position.Pieces (Black_Bishop);
+
+      -- King vs king, or a lone minor against a bare king.
+      if Popcount (W_Minor) <= 1 and then Popcount (B_Minor) = 0 then
+         return True;
+      end if;
+      if Popcount (B_Minor) <= 1 and then Popcount (W_Minor) = 0 then
+         return True;
+      end if;
+
+      -- Bishops on the same color complex cannot mate.
+      if Position.Pieces (White_Knight) = 0
+        and then Position.Pieces (Black_Knight) = 0
+        and then Popcount (Position.Pieces (White_Bishop)) = 1
+        and then Popcount (Position.Pieces (Black_Bishop)) = 1
+        and then (Lowest_Bit (Position.Pieces (White_Bishop)) mod 2)
+                   = (Lowest_Bit (Position.Pieces (Black_Bishop)) mod 2)
+      then
+         return True;
+      end if;
+
+      return False;
+   end Insufficient_Material;
 
    ----------------
    -- Quiescence --
@@ -544,7 +604,10 @@ package body BBChess.Search is
             -- (promotions and evasions out of check are always kept).
             if (not In_Check)
               and then Moves (I).Flag /= Promotion
-              and then Static_Exchange_Value (Position, Moves (I)) < 0
+              and then (Static_Exchange_Value (Position, Moves (I)) < 0
+                        or else Stand
+                          + Kind_Value (Captured_Kind (Position, Moves (I)))
+                          + Delta_Margin <= A)
             then
                null;
             else
@@ -577,11 +640,45 @@ package body BBChess.Search is
    -- Reverse futility margin at depth 1.
    Futility_Margin : constant Score_Type := 180;
 
+   -- Futility pruning: a quiet move is not searched when the static eval
+   -- plus this margin (scaled by the depth) is still below alpha.
+   Futility_Base : constant Score_Type := 120;
+
+   -- Razoring: below alpha by this margin (scaled by the depth) the node is
+   -- resolved by a quiescence search instead of the full-width search.
+   Razor_Margin : constant Score_Type := 300;
+
    -- Aspiration window around the previous iteration score (centipawns).
    Aspiration_Window : constant Score_Type := 40;
 
    -- Null move reduction.
    Null_Reduction  : constant := 2;
+
+   -- Late-move reduction table: reduction applied to a late quiet move as a
+   -- function of the remaining depth and the move index (both capped), from
+   -- the classic log formula, precomputed once at elaboration.
+   LMR_Max_Depth : constant := 64;
+   LMR_Max_Move  : constant := 64;
+   type LMR_Array is array (1 .. LMR_Max_Depth, 1 .. LMR_Max_Move) of Natural;
+
+   function Compute_LMR return LMR_Array is
+      use Ada.Numerics.Elementary_Functions;
+      R : Float;
+      T : LMR_Array := (others => (others => 0));
+   begin
+      for D in 1 .. LMR_Max_Depth loop
+         for M in 1 .. LMR_Max_Move loop
+            R := 0.75 + Log (Float (D)) * Log (Float (M)) / 2.25;
+            if R < 0.0 then
+               R := 0.0;
+            end if;
+            T (D, M) := Natural (R);
+         end loop;
+      end loop;
+      return T;
+   end Compute_LMR;
+
+   LMR_Table : constant LMR_Array := Compute_LMR;
 
    function Negamax (Ctx        : in Context_Access;
                      Position   : in out Position_Type;
@@ -597,21 +694,49 @@ package body BBChess.Search is
       Best_Move_Here : Move_Type := Empty_Move;
       Best_Score  : Score_Type := -Infinity;
       Child_Depth : Natural := 0;
+      Eval_Now    : Score_Type := 0;
+      Have_Eval   : Boolean := False;
    begin
       Poll_Time (Ctx);
+
+      -- Terminal draws: the fifty-move rule and dead positions are scored
+      -- as draws before anything else, including the quiescence call.
+      if Position.Halfmove >= 100
+        or else Insufficient_Material (Position)
+      then
+         return 0;
+      end if;
+
       if Depth = 0 then
          return Quiescence (Ctx, Position, A, B, Ply);
       end if;
 
       -- Record the current node on the search path (for the repetition
-      -- detection of its descendants) and claim a draw on a threefold
-      -- repetition before trusting the transposition table.
+      -- detection of its descendants) and claim a draw on a repetition
+      -- before trusting the transposition table.
       if Ply <= Max_Ply then
          Ctx.Search_Path (Ply) := Position.Key;
       end if;
       if Is_Repetition (Ctx, Position, Ply) then
          return 0;
       end if;
+
+      -- Mate-distance pruning: no node can score better than a mate found
+      -- at the current ply, nor worse than being mated right now.
+      declare
+         M_Alpha : constant Score_Type := -Mate_Score + Ply;
+         M_Beta  : constant Score_Type := Mate_Score - Ply - 1;
+      begin
+         if A < M_Alpha then
+            A := M_Alpha;
+         end if;
+         if B > M_Beta then
+            B := M_Beta;
+         end if;
+         if A >= B then
+            return A;
+         end if;
+      end;
 
       -- Transposition table probe (two-way bucket).
       declare
@@ -660,6 +785,27 @@ package body BBChess.Search is
          end if;
       end if;
 
+      -- Static evaluation for the pruning decisions (only needed at low
+      -- depth and out of check).
+      if not In_Check and then Depth <= 3 then
+         Eval_Now := Evaluate (Position);
+         Have_Eval := True;
+      end if;
+
+      -- Razoring: when the static evaluation is far below alpha, verify with
+      -- a quiescence search and return it if it does not reach alpha.
+      if Depth <= 2 and then not In_Check and then Have_Eval
+        and then Eval_Now + Razor_Margin * Score_Type (Depth) < Alpha
+      then
+         declare
+            Q : constant Score_Type := Quiescence (Ctx, Position, A, B, Ply);
+         begin
+            if Q < Alpha then
+               return Q;
+            end if;
+         end;
+      end if;
+
       -- Check extension: evasions are forced, so an in-check node is
       -- searched one ply deeper than a quiet one. Bounded by Ply so that a
       -- long checking sequence cannot explode the search.
@@ -670,14 +816,10 @@ package body BBChess.Search is
       end if;
 
       -- Reverse futility pruning.
-      if Depth = 1 and then not In_Check then
-         declare
-            Eval_Now : constant Score_Type := Evaluate (Position);
-         begin
-            if Eval_Now - Futility_Margin >= B then
-               return Eval_Now;
-            end if;
-         end;
+      if Depth = 1 and then not In_Check and then Have_Eval then
+         if Eval_Now - Futility_Margin >= B then
+            return Eval_Now;
+         end if;
       end if;
 
       -- Null-move pruning (skip in pawn-only endgames / when in check).
@@ -741,32 +883,69 @@ package body BBChess.Search is
                Undo    : Undo_Info;
                Score   : Score_Type;
                Tactical : constant Boolean := Is_Tactical (Position, Moves (I));
+               Reduction : Natural := 0;
             begin
+               -- Late move pruning: at low depth the late quiet moves are
+               -- simply skipped (they are ordered last and almost never
+               -- improve on the already searched moves).
+               if not In_Check and then not Tactical
+                 and then Depth <= 3
+                 and then Best_Score > -Mate_Threshold
+                 and then I > 4 + Depth * Depth
+               then
+                  goto Next_Move;
+               end if;
+
+               -- Futility pruning: a quiet move whose static evaluation plus
+               -- a depth-scaled margin cannot reach alpha is not searched.
+               if not In_Check and then not Tactical and then Have_Eval
+                 and then Depth <= 2
+                 and then Best_Score > -Mate_Threshold
+                 and then Eval_Now + Futility_Base * Score_Type (Depth) <= Alpha
+               then
+                  goto Next_Move;
+               end if;
+
+               -- Late move reduction for late quiet moves (log formula).
+               if not Tactical and then Depth >= 3 and then I >= 4
+                 and then not In_Check
+               then
+                  Reduction :=
+                    LMR_Table (Natural'Min (Depth, LMR_Max_Depth),
+                               Natural'Min (I, LMR_Max_Move));
+                  if Reduction >= Child_Depth then
+                     Reduction := Child_Depth - 1;
+                  end if;
+               end if;
+
                Make_Move (Position, Moves (I), Undo);
 
                if I = 1 then
                   Score := -Negamax (Ctx, Position, Child_Depth, Ply + 1, -B, -A);
                else
-                  if not Tactical and then Depth >= 3 and then I >= 4
-                    and then not In_Check
-                  then
-                     Score := -Negamax (Ctx, Position, Child_Depth - 1, Ply + 1,
-                                        -A - 1, -A);
-                     if Score > A and then Score < B then
-                        Score := -Negamax (Ctx, Position, Child_Depth, Ply + 1,
-                                           -B, -A);
-                     end if;
-                  else
+                  Score := -Negamax (Ctx, Position, Child_Depth - Reduction,
+                                     Ply + 1, -A - 1, -A);
+                  if Reduction > 0 and then Score > A then
+                     -- Verify a reduced fail-high at full depth.
                      Score := -Negamax (Ctx, Position, Child_Depth, Ply + 1,
                                         -A - 1, -A);
-                     if Score > A and then Score < B then
-                        Score := -Negamax (Ctx, Position, Child_Depth, Ply + 1,
-                                           -B, -A);
-                     end if;
+                  end if;
+                  if Score > A and then Score < B then
+                     Score := -Negamax (Ctx, Position, Child_Depth, Ply + 1,
+                                        -B, -A);
                   end if;
                end if;
 
                Unmake_Move (Position, Moves (I), Undo);
+
+               -- Penalize a quiet move that failed to raise the window, so
+               -- the history heuristic learns to avoid it.
+               if not Tactical and then Ply <= Max_Ply
+                 and then Score <= Alpha
+               then
+                  Bump_History (Ctx, Position.Side, Moves (I).From,
+                                Moves (I).To, -History_Bonus (Depth));
+               end if;
 
                if Score > Best_Score then
                   Best_Score := Score;
@@ -788,6 +967,8 @@ package body BBChess.Search is
                   A := Score;
                end if;
             end;
+            <<Next_Move>>
+            null;
          end loop;
       end;
 
