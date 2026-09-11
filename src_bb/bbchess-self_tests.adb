@@ -40,6 +40,9 @@ use BBChess.Search;
 with BBChess.Hash;
 use BBChess.Hash;
 
+with BBChess.Polyglot;
+use BBChess.Polyglot;
+
 package body BBChess.Self_Tests is
 
    procedure Assert (Condition : in Boolean; Message : in String) is
@@ -478,6 +481,39 @@ package body BBChess.Self_Tests is
                  "SEE ep capture must be +100");
 
          Ada.Text_IO.Put_Line ("SEE tests OK");
+      end;
+
+      -- Polyglot key: must match the reference implementation exactly
+      -- (piece placement, castling, conditional en passant, side to move).
+      declare
+         function Key_Of (Fen : in String) return Bitboard is
+            P : Position_Type;
+         begin
+            Load (P, Fen);
+            return Polyglot_Key (P);
+         end Key_Of;
+      begin
+         Assert
+           (Key_Of ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+            = 16#463B96181691FC9C#,
+            "polyglot key startpos");
+         Assert
+           (Key_Of ("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1")
+            = 16#FDA239CC692A6053#,
+            "polyglot key castling");
+         Assert
+           (Key_Of ("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1")
+            = 16#5F442AAD040588EC#,
+            "polyglot key en passant (capturable)");
+         Assert
+           (Key_Of ("4k3/8/8/3p4/8/8/8/4K3 w - d6 0 1")
+            = 16#5DCDC6EF271A91C9#,
+            "polyglot key en passant (not capturable)");
+         Assert
+           (Key_Of ("r1bq1rk1/pp3ppp/2n1pn2/2pp4/3P1B2/2NBPN2/PPPQ1PPP/2KR3R w - - 0 1")
+            = 16#FA541663E45EC608#,
+            "polyglot key middlegame");
+         Ada.Text_IO.Put_Line ("polyglot key OK");
       end;
 
       Ada.Text_IO.Put_Line ("all self tests OK");
