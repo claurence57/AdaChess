@@ -19,6 +19,7 @@
 with Ada.Text_IO;
 with Ada.Command_Line;
 with Ada.Characters.Handling;
+with Ada.Environment_Variables;
 with Ada.IO_Exceptions;
 with Ada.Real_Time;
 with Ada.Strings.Unbounded;
@@ -53,6 +54,8 @@ with BBChess.Eval;
 use BBChess.Eval;
 
 with BBChess.Self_Tests;
+
+with BBChess.Polyglot;
 
 procedure AdaChess_BB is
 
@@ -224,6 +227,76 @@ procedure AdaChess_BB is
       return Alloc;
    end Time_For_Next_Move;
 
+   -------------------
+   -- Opening book --
+   -------------------
+
+   Book_Max_Ply : constant := 16;   -- stop using the book after this ply
+   Own_Book     : Boolean := True;  -- UCI "OwnBook" (default on)
+
+   -- Probe the book for the engine's side. Returns False when the book is
+   -- disabled, empty, past the opening phase, or the position is not in it.
+   function Try_Book (Move : out Move_Type) return Boolean is
+      M : Move_Type;
+   begin
+      Move := Empty_Move;
+      if not Own_Book or else not BBChess.Polyglot.Book_Loaded then
+         return False;
+      end if;
+      if Game_N = 0 or else Game_N - 1 > Book_Max_Ply then
+         return False;
+      end if;
+      if BBChess.Polyglot.Probe (Pos, M) and then M /= Empty_Move then
+         Move := M;
+         return True;
+      end if;
+      return False;
+   end Try_Book;
+
+   -- Load the book from conventional locations (CWD, executable directory
+   -- and its parent, home). The first readable file wins.
+   procedure Load_Default_Book is
+      use Ada.Strings.Unbounded;
+      Exe : constant String := Ada.Command_Line.Command_Name;
+
+      function Exe_Dir return String is
+         Slash : Natural := 0;
+      begin
+         for I in Exe'Range loop
+            if Exe (I) = '/' then
+               Slash := I;
+            end if;
+         end loop;
+         if Slash = 0 then
+            return ".";
+         end if;
+         return Exe (Exe'First .. Slash - 1);
+      end Exe_Dir;
+
+      D    : constant String := Exe_Dir;
+      Home : constant String :=
+        (if Ada.Environment_Variables.Exists ("HOME")
+         then Ada.Environment_Variables.Value ("HOME") else "");
+      Candidates : constant array (1 .. 6) of Unbounded_String :=
+        (1 => To_Unbounded_String ("books/book.bin"),
+         2 => To_Unbounded_String (D & "/books/book.bin"),
+         3 => To_Unbounded_String (D & "/../books/book.bin"),
+         4 => To_Unbounded_String (Home & "/.adachess/book.bin"),
+         5 => To_Unbounded_String ("book.bin"),
+         6 => To_Unbounded_String (D & "/book.bin"));
+      Ok : Boolean;
+   begin
+      if BBChess.Polyglot.Book_Loaded then
+         return;
+      end if;
+      for C in Candidates'Range loop
+         BBChess.Polyglot.Open_Book (To_String (Candidates (C)), Ok);
+         if Ok then
+            return;
+         end if;
+      end loop;
+   end Load_Default_Book;
+
    -- Search and play when it is the engine's turn. Called after the
    -- opponent's move has been applied and from the "go" / "?" prompts, so
    -- that the search always starts with an up-to-date view of the clock.
@@ -231,9 +304,26 @@ procedure AdaChess_BB is
    begin
       if Protocol and then not Force and then Pos.Side = Engine_Side then
          -- Make sure the game history ends with the current position (a
-         -- real move may have been played since the last sync) and give it
-         -- to the search before it thinks.
+         -- real move may have been played since the last sync).
          Record_Current_Key;
+
+         -- Opening book: play a book move without searching.
+         declare
+            BM   : Move_Type;
+            Undo : Undo_Info;
+         begin
+            if Try_Book (BM) then
+               Ada.Text_IO.Put ("move ");
+               Ada.Text_IO.Put (To_String (BM));
+               Ada.Text_IO.New_Line;
+               Ada.Text_IO.Flush;
+               Make_Move (Pos, BM, Undo);
+               Record_Current_Key;
+               return;
+            end if;
+         end;
+
+         -- Give the game history to the search before it thinks.
          Sync_Game_History;
          declare
             M    : constant Move_Type :=
@@ -389,6 +479,17 @@ procedure AdaChess_BB is
          I := I + 1;
       end loop;
 
+      -- Opening book.
+      declare
+         BM : Move_Type;
+      begin
+         if Try_Book (BM) then
+            Ada.Text_IO.Put_Line ("bestmove " & To_String (BM));
+            Ada.Text_IO.Flush;
+            return;
+         end if;
+      end;
+
       declare
          M : constant Move_Type :=
            Best_Move (Pos, Max_Depth, Time_For_Next_Move);
@@ -507,6 +608,19 @@ begin
       end if;
    end loop;
 
+   -- Optional opening book file (applies to the playing modes).
+   for I in 1 .. Ada.Command_Line.Argument_Count loop
+      if Ada.Command_Line.Argument (I) = "--book"
+        and then I < Ada.Command_Line.Argument_Count
+      then
+         declare
+            Ok : Boolean;
+         begin
+            BBChess.Polyglot.Open_Book (Ada.Command_Line.Argument (I + 1), Ok);
+         end;
+      end if;
+   end loop;
+
    -- Optional number of search threads (Lazy SMP).
    for I in 1 .. Ada.Command_Line.Argument_Count loop
       if Ada.Command_Line.Argument (I) = "--threads"
@@ -563,6 +677,10 @@ begin
       return;
    end if;
 
+   -- Load the opening book (unless --book already did; the special modes
+   -- return before this point).
+   Load_Default_Book;
+
    Main_Loop : loop
       Read_Line;
 
@@ -600,6 +718,10 @@ begin
                ("option name Hash type spin default 64 min 1 max 1024");
              Ada.Text_IO.Put_Line
                ("option name Threads type spin default 1 min 1 max 16");
+             Ada.Text_IO.Put_Line
+               ("option name OwnBook type check default true");
+             Ada.Text_IO.Put_Line
+               ("option name BookFile type string default books/book.bin");
              Ada.Text_IO.Put_Line ("uciok");
              Ada.Text_IO.Flush;
 
@@ -631,6 +753,18 @@ begin
                   and then Token (Par, 3) = "value"
                 then
                    Set_Threads (Parse_Natural (Token (Par, 4), 1));
+                elsif Token (Par, 2) = "OwnBook"
+                  and then Token (Par, 3) = "value"
+                then
+                   Own_Book := Token (Par, 4) = "true";
+                elsif Token (Par, 2) = "BookFile"
+                  and then Token (Par, 3) = "value"
+                then
+                   declare
+                      Ok : Boolean;
+                   begin
+                      BBChess.Polyglot.Open_Book (Token (Par, 4), Ok);
+                   end;
                 end if;
              end if;
 
