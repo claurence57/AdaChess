@@ -38,6 +38,23 @@
 - Gauntlet vs GNU Chess (30 parties) : Phase 1 ≈ 1,5/30, Phase 4a ≈ 3,5/30 —
   léger mieux, **non significatif** à cette taille d'échantillon.
 
+### Ouvertures — livre Polyglot
+
+- Module `BBChess.Polyglot` : clé Zobrist Polyglot (table de 781 constantes),
+  lecture d'un `.bin` standard (16 o/entrée, big-endian, trié) et probe avec
+  sélection pondérée + vérification de légalité.
+- Intégration driver (XBoard + UCI) : `--book <fichier>`, recherche par défaut
+  (`books/book.bin`, répertoire de l'exécutable, `~/.adachess/book.bin`),
+  options UCI `OwnBook`/`BookFile`, limite 16 plies, désactivé pour
+  `--selftest`/`--bench`/`--eval-fens`.
+- `scripts/fetch_book.sh` : télécharge un book **CC0** (Lichess/jja) et
+  l'installe en `books/book.bin` (non commité, gitignoré).
+- Cross-check de la clé Polyglot ajouté au `--selftest` (startpos, roque,
+  en passant capturable/non capturable, milieu de partie).
+- Mesure : gauntlet vs GNU, avec book ≈ -352 Elo vs sans book ≈ -382
+  (≈ +30 Elo, non significatif à 30 parties) ; l'ouverture `1.Nc3` disparaît
+  au profit de e4/d4/Nf3/c4.
+
 ### Performance
 - Harnais `--bench [profondeur]` (8 positions, nœuds/s).
 - Intrinsèques bits (`popcnt`/`bsf`) via shim C + `-mpopcnt -mbmi`, inlining

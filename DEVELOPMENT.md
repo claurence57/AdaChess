@@ -598,5 +598,43 @@ recherche est temporisée et donc non déterministe, ce qui rend les petites
 différences inmesurables sur 20-30 parties ; il faudrait un vrai SPRT sur
 plusieurs centaines de parties pour trancher.
 
-Prochaines étapes : Phase 3 (book Polyglot + Syzygy + gestion
-du temps), Phase 4 (singular extensions, ProbCut, SPSA).
+Prochaines étapes : Phase 4b (singular extensions, ProbCut, SPSA), puis Syzygy
+et l'usage du book dans les tests.
+
+---
+
+## 10. Livre d'ouvertures Polyglot
+
+Objectif : supprimer l'ouverture faible de BB (`1.Nc3` récurrent) en utilisant
+un book standard.
+
+- **Module `BBChess.Polyglot`** : clé Zobrist Polyglot (table de 781 constantes
+  embarquée, générée depuis `python-chess`) — placement des pièces (encodage
+  Polyglot : **noir en premier**), droits de roque, en passant **conditionnel**
+  (seulement si un pion du trait peut capturer), trait. Lecture d'un `.bin`
+  (16 octets/entrée, big-endian, trié par clé) et probe : recherche binaire,
+  choix pondéré par le poids, décodage du coup et **vérification de légalité**.
+- **Intégration driver** : probe avant la recherche dans `Play_If_My_Turn`
+  (XBoard) et `Handle_UCI_Go` (UCI) ; limite **16 plies** ; `--book <fichier>`
+  et recherche par défaut (`books/book.bin`, répertoire de l'exécutable et son
+  parent, `~/.adachess/book.bin`) ; options UCI `OwnBook`/`BookFile` ;
+  désactivé pour les modes `--selftest`/`--bench`/`--eval-fens`.
+- **Source des données** : books **CC0** générés par `jja`
+  (https://www.chesswob.org/jja/books/), téléchargés par
+  `scripts/fetch_book.sh` (défaut `gm2600`, ~12 Mo / 750 k entrées). Le `.bin`
+  n'est pas commité (`books/` gitignoré).
+- **Validation** : cross-check de `Polyglot_Key` contre `python-chess` ajouté au
+  `--selftest` (startpos, roque, en passant capturable et non capturable,
+  milieu de partie). `--bench 9` inchangé (book non chargé dans ces modes).
+- **Mesure** (gauntlet vs GNU, 30 parties par config) : avec book ≈ -352 Elo,
+  sans book ≈ -382 — léger mieux (+30), non significatif à cet échantillon.
+  Effet visible : `1.Nc3` disparaît (e4/d4/Nf3/c4) et les réponses en Noir
+  suivent le book (c5, e5, d5, Nc6, Nf6).
+
+Piège rencontré : le buffer complet du book (12 Mo) alloué en local dans
+`Open_Book` provoquait un `STORAGE_ERROR` (pile) → lecture par entrée de 16
+octets. Autre piège : l'encodage Polyglot met **noir en premier** (index pair =
+pièce noire) ; l'inverser donnait une clé fausse (détecté par le cross-check).
+
+Prochaines étapes : Phase 4b (singular extensions, ProbCut, SPSA), Syzygy, et
+mesurer le book sur un plus gros échantillon / une suite d'ouvertures.
