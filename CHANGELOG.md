@@ -61,6 +61,15 @@
   (≈ +30 Elo, non significatif à 30 parties) ; l'ouverture `1.Nc3` disparaît
   au profit de e4/d4/Nf3/c4.
 
+### Recherche — singular extensions
+
+- Extension singulière dans `Negamax` : paramètre `Excluded` (défaut
+  `Empty_Move`) ; probe à `(Depth-1)/2` en excluant le coup TT, extension de
+  +1 ply si les alternatives sont nettement moins bonnes ; TT ni lue ni écrite
+  pendant le probe.
+- Coût : `--bench 11` +12,5 % de nœuds (+17 % temps). A/B self-play 60 parties :
+  **neutre** (PRE +5,8 ± 67,9 Elo, LOS 57 %). Conservé, gain à confirmer en SPRT.
+
 ### Évaluation — optimisations mesurées (prompt `/tmp/kk`)
 
 - **B1** : `Defended_By_Pawn` remplacé par un lookup inversé unique

@@ -701,3 +701,27 @@ non tenté : retirer `-gnatN` contredit le ×3,8 mesuré en §7ter.
 **Conclusion** : aucune optimisation d'éval du prompt n'apporte de gain
 mesurable ; le levier reste la **qualité de recherche** (Phase 4b : singular,
 ProbCut, SPSA ; puis Syzygy).
+
+---
+
+## 13. Singular extensions
+
+Implémenté dans `bbchess-search.adb` : quand le coup de la table de
+transposition est nettement meilleur que toutes les alternatives, il est
+cherché un ply plus profond.
+
+- `Negamax` prend un paramètre `Excluded` (défaut `Empty_Move`). Le probe
+  singulier recherche la **même position** à profondeur `(Depth-1)/2` avec le
+  coup de référence **exclu** ; `Excluded` désactive aussi le cutoff et le store
+  de la TT (pour ne pas polluer la table avec un score calculé sans ce coup), et
+  le coup exclu est sauté dans la boucle de coups.
+- Conditions : `Depth ≥ 8`, hors échec, coup TT présent, score TT fiable
+  (`TT_Depth ≥ Depth-3`, borne ≠ supérieure). Si le meilleur autre coup est
+  `< TT_Score − 2·Depth`, le coup est singulier → extension de **+1 ply**.
+- Coût mesuré : `--bench 11` 2,62 M → **2,95 M nœuds (+12,5 %)**, temps +17 %.
+  `--selftest` vert.
+- A/B self-play (60 parties, 1 s+0,1 s) : **neutre** (PRE +5,8 ± 67,9 Elo,
+  LOS 57 %). Conservé (technique standard, demandée) mais **gain non démontré**
+  à cette cadence — à re-mesurer en SPRT sur plusieurs centaines de parties.
+
+Prochaine étape : Syzygy.
