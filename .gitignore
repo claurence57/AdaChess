@@ -11,6 +11,7 @@ gnatinspect.*
 /adachess-loc.xml
 .idea
 .idea/*
+.omo/
 *.zip
 books/*
 debug/*
