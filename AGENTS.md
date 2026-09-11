@@ -10,7 +10,7 @@ Know which one you are editing before you start.
 | Binary | `./adachess` (repo root) | `./bin_bb/adachess_bb` |
 | Role | Reference / perft oracle | Active development target |
 
-`DEVELOPMENT.md` is the authoritative engineering log (in French, ~520 lines); it
+`DEVELOPMENT.md` is the authoritative engineering log (in French, ~640 lines); it
 uses **MB** and **BB** for the two engines throughout. `CHANGELOG.md` covers BB.
 `README.md` is the upstream MB readme and is partly stale (v4.0/Windows).
 
@@ -32,7 +32,8 @@ gprbuild -P adachess_bb.gpr -XMode=release   # -> ./bin_bb/adachess_bb
 
 ```bash
 ./bin_bb/adachess_bb --selftest    # perft 1-5, Zobrist, packed moves, FEN
-                                   # validation, search, repetition, SEE. Exit 0.
+                                   # validation, search, repetition, SEE,
+                                   # Polyglot key. Exit 0.
 ./bin_bb/adachess_bb --bench 9     # 8 fixed positions at depth 9 -> nodes/time/knps
 ```
 
@@ -58,8 +59,9 @@ scripts/vs_gnuchess.sh 30+1 12 7  # vs GNU Chess (UCI)
 ## BB command-line modes
 
 `--selftest`, `--bench [depth]` (default 8), `--threads N` (Lazy SMP, max 16),
-`--dump-params`, `--eval-fens <file>`, `--params <file>`. `--params`/`--threads`
-apply to every mode.
+`--book <file>`, `--dump-params`, `--eval-fens <file>`, `--params <file>`.
+`--params`/`--threads` apply to every mode; `--book` only to the playing modes
+(the book is not probed by `--selftest`/`--bench`/`--eval-fens`).
 
 BB speaks **both** XBoard and UCI (protocol selected by the `uci` command).
 `go` exists in both protocols. UCI search is synchronous — `stop` does not
