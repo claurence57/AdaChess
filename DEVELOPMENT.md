@@ -759,3 +759,79 @@ Piège de build : `tbchess.c` est destiné à être **inclus** par `tbprobe.c`
 compile séparément et échoue).
 
 Licence : Fathom est **MIT** (compatible GPLv3), voir `src_bb/fathom/LICENSE`.
+
+---
+
+## 15. Protocole SPRT (validation A/B)
+
+Objectif : sortir du bruit des matchs à taille fixe. Jusqu'ici les A/B de
+20-60 parties donnaient des écarts contradictoires (±65-80 Elo) : aucun des
+changements récents (threats, livre, singular extensions) n'a pu être validé
+proprement, et la Phase 2 a été acceptée puis revertée sur des mesures
+incohérentes (cf. §9.3). Le SPRT remplace « je joue N parties puis je regarde
+l'intervalle » par une **procédure séquentielle** qui décide après chaque partie.
+
+### 15.1 Le modèle
+
+Le **Sequential Probability Ratio Test** (Wald, 1945) teste deux hypothèses sur
+l'écart d'Elo réel entre deux binaires :
+
+- **H0** : NEW n'est pas meilleur que OLD de plus que `elo0` → le patch échoue ;
+- **H1** : NEW est meilleur que OLD d'au moins `elo1` → le patch passe.
+
+Après chaque partie on met à jour le **log-rapport de vraisemblance (LLR)** entre
+les deux hypothèses (modèle logistique gain/nulle/perte ; `cutechess-cli` utilise
+le modèle « pentanomial » par paires de couleurs). On le compare à deux bornes :
+
+- borne haute `A = ln((1-β)/α)` ;
+- borne basse `B = ln(β/(1-α))`.
+
+Décisions : `LLR ≥ A` → H1 acceptée (**PASS**) ; `LLR ≤ B` → H0 acceptée
+(**FAIL**) ; sinon on continue. Avec α = β = 0,05 : A ≈ **+2,944** et
+B ≈ **−2,944**. Le test s'arrête tôt pour un patch nettement bon ou mauvais, et
+ne joue beaucoup que si l'écart réel tombe entre les bornes. Les probabilités
+d'erreur de type I/II hors de `[elo0, elo1]` sont bornées par α et β.
+
+À ne pas confondre avec le **LOS** affiché par `cutechess-cli` : le LOS est la
+probabilité que NEW > OLD **sans seuil d'effet** (un +1 Elo peut avoir LOS 60 %),
+le SPRT teste un **effet minimal** et rend un verdict PASS/FAIL.
+
+### 15.2 Implémentation
+
+- **`scripts/sprt.sh`** — harnais : deux binaires (OLD/NEW), cadence, bornes
+  `elo0`/`elo1`, α/β, plafond de parties, graine. Il lance `cutechess-cli -sprt`,
+  lit la dernière ligne `SPRT:` du log et imprime un verdict
+  `PASS` / `FAIL` / `INCONCLUSIVE` (codes de sortie 0 / 1 / 2).
+- **`openings/openings.epd`** — 65 ouvertures équilibrées (4-6 plis), générées
+  par **`scripts/gen_openings.py`** (liste SAN validée par `python-chess`).
+  Chaque position est jouée **deux fois, couleurs inversées** (`-repeat`) :
+  supprime le biais de couleur et décorrèle les parties (hypothèse i.i.d.).
+- **Contrainte de comptage** : pour deux moteurs, `cutechess` joue
+  `rounds × games` parties ; le script fixe `-games 2 -rounds max_games/2`
+  pour jouer chaque ouverture dans les deux couleurs.
+
+```
+scripts/sprt.sh [tc] [elo0] [elo1] [max_games] [seed] [old] [new]
+# défauts : 1+0.1  0  5  2000  7  ~/bin/adachess_bb  bin_bb/adachess_bb
+```
+
+Pour valider un **patch**, passer le binaire **d'avant** en OLD :
+
+```
+scripts/sprt.sh 1+0.1 0 5 2000 7 /tmp/opencode/adachess_bb_p1 bin_bb/adachess_bb
+```
+
+(Comparer directement à la référence `bb-1.0` donne un PASS immédiat : l'écart
+est d'environ +300 Elo.)
+
+### 15.3 Bonnes pratiques
+
+- `--selftest` vert et perft inchangé **avant** tout match.
+- Suite d'ouvertures variée obligatoire : sans elle, les parties se ressemblent
+  et l'hypothèse d'indépendance est violée. Le self-play entre versions voisines
+  (~50 % de nulles) reste le cas le plus bruité.
+- Un FAIL est une information, pas un échec : un patch neutre (±2 Elo) est
+  rejeté vite ; un patch borderline fait jouer longtemps avant de trancher.
+- Si le non-déterminisme de la recherche temporisée gêne, valider d'abord en
+  profondeur/nœuds fixes, puis confirmer en cadence réelle.
+- Conserver les PGN (chemin imprimé en fin de script) pour inspecter les parties.

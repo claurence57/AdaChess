@@ -55,6 +55,12 @@ scripts/vs_gnuchess.sh 30+1 12 7  # vs GNU Chess (UCI)
   Rebuild BB first; it uses `bin_bb/adachess_bb` as HEAD.
 - `vs_gnuchess.sh` needs the wrapper `~/bin/gnuchess_uci.sh` (GNU Chess must run
   as UCI; its XBoard mode is incomplete). Both paths are machine-local, not in-repo.
+- `scripts/sprt.sh [tc] [elo0] [elo1] [max_games] [seed] [old] [new]` is the
+  **decision tool**: sequential test (verdict PASS/FAIL/INCONCLUSIVE, exit 0/1/2)
+  between two builds, using `openings/openings.epd` in both colours. Validate a
+  patch by passing the *previous* binary as `old`; see `DEVELOPMENT.md` §15.
+- `ab.sh`/`vs_gnuchess.sh` scores over 20-60 games are ±65-80 Elo noise — prefer
+  SPRT for any accept/reject decision.
 
 ## BB command-line modes
 

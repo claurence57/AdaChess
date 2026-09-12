@@ -98,6 +98,19 @@
 - Bilan : aucune optimisation d'éval du prompt n'apporte de gain mesurable ;
   l'axe utile reste la qualité de recherche.
 
+### Outillage — harnais SPRT
+
+- **`scripts/sprt.sh`** : test séquentiel (Wald) entre deux binaires, avec bornes
+  `elo0`/`elo1`, `alpha`/`beta`, plafond de parties et graine ; verdict
+  `PASS`/`FAIL`/`INCONCLUSIVE` (codes 0/1/2). Remplace les A/B à taille fixe
+  dont le bruit (±65-80 Elo sur 20-60 parties) rendait les petits gains
+  inmesurables (cf. `DEVELOPMENT.md` §9.3).
+- **`openings/openings.epd`** (+ `scripts/gen_openings.py`) : 65 ouvertures
+  équilibrées (4-6 plis, SAN validé par `python-chess`) ; chaque position est
+  jouée dans les deux couleurs (`-repeat`) pour supprimer le biais de couleur
+  et décorréler les parties.
+- Protocole documenté en `DEVELOPMENT.md` §15.
+
 ### Performance
 - Harnais `--bench [profondeur]` (8 positions, nœuds/s).
 - Intrinsèques bits (`popcnt`/`bsf`) via shim C + `-mpopcnt -mbmi`, inlining
