@@ -835,3 +835,27 @@ est d'environ +300 Elo.)
 - Si le non-déterminisme de la recherche temporisée gêne, valider d'abord en
   profondeur/nœuds fixes, puis confirmer en cadence réelle.
 - Conserver les PGN (chemin imprimé en fin de script) pour inspecter les parties.
+
+---
+
+## 16. Build portable (sans POPCNT/BMI)
+
+Le mode `release` de BB suppose POPCNT/BMI1/BMI2 (attaques PEXT matérielles) :
+sur un CPU plus ancien le binaire s'arrête sur une instruction illégale. Un
+mode `portable` a donc été ajouté au projet pour produire un binaire qui tourne
+sur n'importe quel x86-64 :
+
+```bash
+gprbuild -P adachess_bb.gpr -XMode=portable   # -> bin_bb/adachess_bb
+```
+
+- **`adachess_bb.gpr`** : le mode `portable` utilise `-O3 -gnatN` **sans**
+  `-mpopcnt -mbmi -mbmi2` ; le mode `release` reste inchangé.
+- **`bbchess-bits.c`** : `bb_pext` utilise `_pext_u64` seulement si `__BMI2__`
+  est défini, sinon une boucle logicielle extrait les bits du masque ;
+  `__builtin_popcountll` / `__builtin_ctzll` se rabattent sur les routines
+  libgcc. Un seul fichier sert donc les deux modes.
+- **Mesure** : `--bench 9` ≈ **1,07 M knps** contre 1,46 M en `release` (~27 %
+  plus lent), **arbre identique** (780 851 nœuds) ; `--selftest` vert, perft 1→5
+  inchangé. Les deux modes partagent `obj_bb/` : ne pas mélanger les builds dans
+  le même arbre.

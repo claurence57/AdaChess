@@ -17,14 +17,19 @@ uses **MB** and **BB** for the two engines throughout. `CHANGELOG.md` covers BB.
 ## Build
 
 ```bash
-gprbuild -P adachess.gpr    -XMode=release   # -> ./adachess
-gprbuild -P adachess_bb.gpr -XMode=release   # -> ./bin_bb/adachess_bb
+gprbuild -P adachess.gpr    -XMode=release      # -> ./adachess
+gprbuild -P adachess_bb.gpr -XMode=release      # -> ./bin_bb/adachess_bb
+gprbuild -P adachess_bb.gpr -XMode=portable     # -> ./bin_bb/adachess_bb
 ```
 
 - Toolchain: GNAT Ada 2012 + `gprbuild`. MB modes: `release` (default), `speed`,
-  `debug`, `profile`. BB modes: `release` (default), `debug`.
-- BB release compiles with `-mpopcnt -mbmi -mbmi2` and uses `_pext_u64` (PEXT) for
-  sliding attacks — it requires a CPU with BMI2/POPCNT.
+  `debug`, `profile`. BB modes: `release` (default), `debug`, `portable`.
+- BB `release` compiles with `-mpopcnt -mbmi -mbmi2` and uses `_pext_u64` (PEXT)
+  for sliding attacks — it requires a CPU with BMI2/POPCNT. BB `portable` drops
+  those switches and falls back to a software PEXT (`bbchess-bits.c`), so it runs
+  on any x86-64 CPU at ~25% lower speed; both modes are otherwise identical.
+- Rebuilding `release` after `portable` (or vice-versa) is safe, but the two
+  share `obj_bb/`, so never mix them in the same tree to compare `--bench`.
 - **Gotcha**: after any `-pg`/`profile` build, `rm -rf obj_bb` before rebuilding
   normally. gprbuild reuses instrumented objects and skews `--bench` by ~3x.
 

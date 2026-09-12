@@ -111,6 +111,17 @@
   et décorréler les parties.
 - Protocole documenté en `DEVELOPMENT.md` §15.
 
+### Outillage — build portable (sans POPCNT/BMI)
+
+- Nouveau mode `-XMode=portable` dans `adachess_bb.gpr` : mêmes optimisations
+  (`-O3 -gnatN`) mais **sans** `-mpopcnt -mbmi -mbmi2`.
+- `bbchess-bits.c` : `bb_pext` garde `_pext_u64` si `__BMI2__` est défini,
+  sinon repli logiciel (boucle sur les bits du masque) ; `__builtin_popcountll`
+  et `__builtin_ctzll` se rabattent sur les routines libgcc.
+- Le binaire portable tourne sur **n'importe quel x86-64** (~27 % plus lent :
+  `--bench 9` ≈ 1,07 vs 1,46 M knps), arbre identique (780 851 nœuds),
+  `--selftest` vert et perft 1→5 inchangé. Le mode `release` est inchangé.
+
 ### Performance
 - Harnais `--bench [profondeur]` (8 positions, nœuds/s).
 - Intrinsèques bits (`popcnt`/`bsf`) via shim C + `-mpopcnt -mbmi`, inlining
