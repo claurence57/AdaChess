@@ -48,6 +48,21 @@ NEW="$(realpath "$NEW")"
 [ -x "$OLD" ] || { echo "OLD engine not executable: $OLD" >&2; exit 1; }
 [ -x "$NEW" ] || { echo "NEW engine not executable: $NEW" >&2; exit 1; }
 
+# Fairness: the engines must have the same opening-book availability. The
+# default book search looks next to the executable and its parent, so a binary
+# in bin_bb/ silently uses books/book.bin while one in /tmp does not. Disable
+# the book for the whole match (the opening suite provides the variety) and
+# restore it on exit, whatever happens.
+ROOT_BOOK="$ROOT/books/book.bin"
+BOOK_HIDDEN=""
+cleanup_book() { [ -n "$BOOK_HIDDEN" ] && mv -f "$BOOK_HIDDEN" "$ROOT_BOOK" || true; }
+trap cleanup_book EXIT
+if [ -f "$ROOT_BOOK" ]; then
+  BOOK_HIDDEN="$ROOT_BOOK.hidden.$$"
+  mv -f "$ROOT_BOOK" "$BOOK_HIDDEN"
+  echo "note: opening book disabled for a fair match ($ROOT_BOOK)"
+fi
+
 mkdir -p /tmp/opencode
 LOG="/tmp/opencode/sprt_$$.log"
 OUT="/tmp/opencode/sprt_$$.pgn"
