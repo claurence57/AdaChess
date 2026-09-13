@@ -859,3 +859,74 @@ gprbuild -P adachess_bb.gpr -XMode=portable   # -> bin_bb/adachess_bb
   plus lent), **arbre identique** (780 851 nœuds) ; `--selftest` vert, perft 1→5
   inchangé. Les deux modes partagent `obj_bb/` : ne pas mélanger les builds dans
   le même arbre.
+
+---
+
+## 17. Sécurité du roi — deux tentatives (résultats négatifs)
+
+Contexte : l'analyse des 80 parties contre GNU (§ analyse du milieu de jeu) a
+montré que BB **sous-estime l'attaque adverse**. Cas typique (`decision.epd`,
+position #10) : l'éval statique de BB donne `f6e6` = +690 (il gagne la dame) et
+`f6g5` = −114, mais la recherche joue `f6g5` ; Stockfish dit `f6g5` ≈ −10,5.
+Après `Qg5 Rxg7 Kxg7`, BB statique = **+116** alors que Stockfish voit un **mat
+forcé** : BB ne « sent » pas l'attaque.
+
+Deux refontes du terme de sécurité du roi (`King_Safety`, `bbchess-eval.adb`)
+ont été tentées, chacune : corrige le blunder ciblé, mais **régresse en force**.
+
+### 17.1 Version forte (revertée)
+
+- Zone d'attaque **5×5** (au lieu des seules cases adjacentes), **unités
+  d'attaque** pondérées par type (C/F=2, T=3, D=5, pion=1, ajoutés aux params
+  `P_Atk_Pawn`/`P_King_Danger`), **danger non linéaire**
+  (`Unités² × P_King_Danger / 10`, plafond 1200).
+- Calibration `--params` : K=40 → biais décision +43 (vs +53 sans terme), mais
+  écart sur les 65 ouvertures équilibrées 75 (vs 63).
+- Banc ciblé : **#10 joue `f6e6`** dès depth 12 ; move-quality d18 +0,37 (vs
+  +0,55).
+- **SPRT vs HEAD (1+0.1, ouvertures neutres) : OLD 24-9-7 (68,8 %), ≈ −137 Elo,
+  LOS 99,5 % → régression nette. Revertée.**
+
+### 17.2 Version chirurgicale (revertée)
+
+- Même structure mais **zone lointaine pondérée ÷2**, pions à poids 1,
+  **quadratique plafonné à 400**, `P_King_Danger = 60`.
+- Calibration : ouvertures |biais| **69** (vs 63 sans terme), biais décision
+  **+10** (vs +53) ; **#10 joue `f6e6`** à depth 12.
+- **SPRT vs HEAD : OLD 22-11-7 (63,7 %), ≈ −98 Elo, LOS 97 % → régression nette.
+  Revertée.**
+
+### 17.3 Leçon
+
+Le terme « sent » bien l'attaque (corrige le blunder, améliore la calibration
+sur les positions critiques) mais **pénalise trop de positions saines** : le
+coût dépasse le gain sur 40 parties, aux deux réglages. Un bon terme de
+sécurité du roi demande un **modèle plus fin** (attaquants réellement actifs,
+phases, lignes ouvertes) **et un tuning automatique**, pas un patch de
+constantes. Piste suivante : côté **recherche** (profondeur effective sur les
+lignes forcées), documentée en §18.
+
+---
+
+## 18. Extensions de recherche — tentatives (résultats négatifs)
+
+Pour voir la réfutation de `f6g5` (§17) **sans toucher l'éval**, deux extensions
+standard ont été essayées dans `bbchess-search.adb`, mesurées par `--bench 9`
+(référence : 780 851 nœuds / 0,53 s) et sur le coup joué en #10 :
+
+- **Extension en échec** (tout coup donnant échec cherché +1 ply) :
+  arbre **×2,8** (2 190 090 nœuds / 1,73 s) ; #10 joue toujours `f6g5`. Les
+  échecs étant très fréquents, l'extension coûte plus que ce qu'elle rapporte.
+  **Revertée.**
+- **Extension « recapture »** (capture sur la case du coup précédent, +1 ply) :
+  arbre **×3,1** (2 400 061 nœuds / 1,86 s) ; #10 joue toujours `f6g5`.
+  **Revertée.**
+
+Leçon : à cadence fixe, ces extensions font perdre plus de profondeur qu'elles
+n'en rendent sur la ligne visée. Une amélioration côté recherche demande
+davantage (checks en quiescence bornés par une profondeur de quiescence, IID,
+meilleur ordonnancement) et sa **propre campagne SPRT**.
+
+Bilan des §17-18 : ni le réglage de l'éval, ni les extensions simples ne
+corrigent le point faible sans coût net. `--selftest` reste vert et le bench
+revient à 780 851 nœuds après chaque revert.

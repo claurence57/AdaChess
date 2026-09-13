@@ -122,6 +122,23 @@
   `--bench 9` ≈ 1,07 vs 1,46 M knps), arbre identique (780 851 nœuds),
   `--selftest` vert et perft 1→5 inchangé. Le mode `release` est inchangé.
 
+### Évaluation — sécurité du roi : deux tentatives négatives
+
+- **Version forte** : zone 5×5, unités d'attaque pondérées (+ pions), danger
+  non linéaire plafonné. Corrige le blunder ciblé (`f6g5` → `f6e6`) mais
+  **SPRT vs HEAD ≈ −137 Elo, LOS 99,5 %** → revertée.
+- **Version chirurgicale** : zone lointaine ÷2, quadratique plafonné à 400,
+  `P_King_Danger = 60`. Corrige aussi le blunder et améliore la calibration
+  (biais décision +10 vs +53) mais **SPRT ≈ −98 Elo, LOS 97 %** → revertée.
+- Détails et leçon en `DEVELOPMENT.md` §17.
+
+### Recherche — extensions (résultats négatifs)
+
+- **Extension en échec** : arbre ×2,8 (2,19 M nœuds), ne corrige pas le coup
+  ciblé → revertée.
+- **Extension « recapture »** : arbre ×3,1 (2,40 M nœuds), ne corrige pas le
+  coup ciblé → revertée. Détails en `DEVELOPMENT.md` §18.
+
 ### Performance
 - Harnais `--bench [profondeur]` (8 positions, nœuds/s).
 - Intrinsèques bits (`popcnt`/`bsf`) via shim C + `-mpopcnt -mbmi`, inlining
