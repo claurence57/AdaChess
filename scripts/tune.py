@@ -80,6 +80,8 @@ def main():
     ap.add_argument("--rounds", type=int, default=6)
     ap.add_argument("--out", default="/tmp/opencode/tuned2.txt")
     ap.add_argument("--val-every", type=int, default=5)
+    ap.add_argument("--material", action="store_true",
+                    help="also tune material values (off by default)")
     args = ap.parse_args()
 
     global results, train_idx, val_idx
@@ -92,7 +94,8 @@ def main():
     train_idx = [i for i in range(len(results)) if i not in val_set]
 
     params = read_params()
-    tune = [p for p in params if p != "P_PAWN"]
+    material = {"P_PAWN", "P_KNIGHT", "P_BISHOP", "P_ROOK", "P_QUEEN"}
+    tune = [p for p in params if args.material or p not in material]
     step = {p: initial_step(p) for p in tune}
     tmp = "/tmp/opencode/_cur_params.txt"
 
