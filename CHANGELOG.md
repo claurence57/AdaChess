@@ -151,6 +151,16 @@
   contrôle HEAD vs HEAD à 40 parties = ±87 Elo → décisions en 300 parties
   (±33-36). Voir `DEVELOPMENT.md` §15.4.
 
+### Outillage — banc diagnostique et tuner SPSA
+
+- **`scripts/diag_bench.py`** (`build`/`score`) + **`bench/diag.tsv`** : banc de
+  40 positions tirées des défaites vs GNU, avec le coup attendu de Stockfish,
+  pour mesurer un taux de réussite **global** (baseline HEAD : 28 % de coups
+  corrects, +0,33 pion de perte moyenne).
+- **`scripts/spsa.py`** : tuner SPSA des paramètres d'éval (deux jeux de
+  `--params` sur le même binaire, match A/B, livre neutralisé/restauré).
+  Infrastructure validée ; voir `DEVELOPMENT.md` §19-20.
+
 ### Performance
 - Harnais `--bench [profondeur]` (8 positions, nœuds/s).
 - Intrinsèques bits (`popcnt`/`bsf`) via shim C + `-mpopcnt -mbmi`, inlining

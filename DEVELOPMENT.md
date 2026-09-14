@@ -957,3 +957,43 @@ amélioration côté recherche demande un ordonnancement/élagage plus fins et s
 Bilan des §17-18 : ni le réglage de l'éval, ni les extensions/IID/checks ne
 corrigent le point faible sans coût net. `--selftest` reste vert et le bench
 revient à 780 851 nœuds après chaque revert.
+
+---
+
+## 19. Banc de positions diagnostiques
+
+Pour arrêter d'optimiser une seule position (leçon des §17-18), un banc de
+40 positions tirées des parties perdues contre GNU a été construit, chacune avec
+le **coup attendu de Stockfish** :
+
+- **`scripts/diag_bench.py build`** : parcourt les PGN perdus contre GNU,
+  compare le coup joué par BB au meilleur coup de Stockfish et retient les
+  erreurs **graduées** (perte 1-6 pions, pour éviter un banc saturé de mats) ;
+  écrit `bench/diag.tsv` (`perte`, `phase`, `coup_attendu`, `FEN`).
+- **`scripts/diag_bench.py score --binary <b>`** : rejoue chaque position avec un
+  **processus BB neuf** (TT isolé, `OwnBook=false` → reproductible) et rapporte
+  le **taux de coups corrects** et la **perte moyenne** vs Stockfish (bornée à
+  ±10 pions pour neutraliser les scores de mat).
+
+Contenu : 40 positions (27 milieu de jeu, 10 finale, 3 ouverture), pertes 1-6.
+**Baseline HEAD : 11/40 coups corrects (28 %), perte moyenne +0,33 pion**
+(médiane +0,27). Ce banc est un **thermomètre multi-positions** de
+non-régression (en complément de `--selftest`), pas une cible d'optimisation.
+
+---
+
+## 20. Tuner SPSA (infrastructure)
+
+`scripts/spsa.py` implémente la boucle SPSA exigée par le recadrage (le résultat
+vient du **résultat réel des parties**, pas de l'erreur statique) :
+
+- compare **deux jeux de paramètres avec le même binaire** via des wrappers
+  `--params` (aucun rebuild) ;
+- perturbation simultanée ±c de 36 paramètres d'éval (hors matériel), match
+  A/B, mise à jour SPSA (pas `c_k = c0/(k+1)^0.101`, `a_k = 6/(k+1+10)^0.602`) ;
+- livre neutralisé (fairness) et **restauré même en cas d'arrêt** (signal/
+  `finally`) ; snapshots `params_current.txt` + log par itération.
+
+Statut : infrastructure validée par smoke test. Un run utile demande plusieurs
+heures de calcul (à 1+0.1, ~300 parties pour trancher un petit écart) ; le
+meilleur jeu devra être **re-validé par un SPRT 300 parties** à cadence réelle.

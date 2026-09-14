@@ -10,7 +10,7 @@ Know which one you are editing before you start.
 | Binary | `./adachess` (repo root) | `./bin_bb/adachess_bb` |
 | Role | Reference / perft oracle | Active development target |
 
-`DEVELOPMENT.md` is the authoritative engineering log (in French, ~640 lines); it
+`DEVELOPMENT.md` is the authoritative engineering log (in French, ~1000 lines); it
 uses **MB** and **BB** for the two engines throughout. `CHANGELOG.md` covers BB.
 `README.md` is the upstream MB readme and is partly stale (v4.0/Windows).
 
@@ -66,6 +66,11 @@ scripts/vs_gnuchess.sh 30+1 12 7  # vs GNU Chess (UCI)
   patch by passing the *previous* binary as `old`; see `DEVELOPMENT.md` §15.
 - `ab.sh`/`vs_gnuchess.sh` scores over 20-60 games are ±65-80 Elo noise — prefer
   SPRT for any accept/reject decision.
+- `scripts/diag_bench.py build|score` measures a **global** success rate on a
+  40-position bench (`bench/diag.tsv`, Stockfish-expected moves); never optimize
+  a single position (`DEVELOPMENT.md` §19).
+- `scripts/spsa.py` tunes eval parameters via SPSA over `--params` (same binary,
+  book neutralised); validate any result with a 300-game SPRT (§20).
 
 ## BB command-line modes
 
