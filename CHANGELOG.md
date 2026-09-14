@@ -168,6 +168,9 @@
   (parties humaines variées) ; pipeline Texel (`scripts/tune.py`) validé
   (MSE réduite sur tranche 10k). Validation du jeu tuné **imposée par SPRT
   300 parties** (jamais sur la seule MSE). Voir `DEVELOPMENT.md` §21.
+- **Résultat : négatif.** Le jeu tuné (100k positions, 6 rounds) réduit la MSE
+  mais **perd ≈ 38 Elo** en SPRT 300 parties vs HEAD → **rejeté**. La MSE reste
+  déconnectée de la force à cette échelle.
 
 ### Performance
 - Harnais `--bench [profondeur]` (8 positions, nœuds/s).

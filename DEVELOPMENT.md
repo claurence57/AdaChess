@@ -1031,3 +1031,12 @@ printf '#!/bin/sh\nexec "$PWD/bin_bb/adachess_bb" --params /tmp/opencode/tuned_l
     > /tmp/opencode/tuned_wrap.sh && chmod +x /tmp/opencode/tuned_wrap.sh
 scripts/sprt.sh 1+0.1 0 5 300 7 "$PWD/bin_bb/adachess_bb" /tmp/opencode/tuned_wrap.sh
 ```
+
+**Résultat (négatif).** Sur les 100 000 positions, `tune.py` réduit bien la MSE
+(train 0,2173 → 0,2141 ; val 0,2158 → 0,2125) mais le jeu obtenu — 30 paramètres
+modifiés, souvent poussés à 0 ou à des valeurs extrêmes — **perd ≈ 38 Elo** en
+SPRT 300 parties vs HEAD (117-84-99, LOS 99 %) → **rejeté**. Conclusion : à
+grande échelle et avec des parties humaines variées, la **MSE reste déconnectée
+de la force** ; le tuning Texel n'est pas le bon levier. Reste l'option **SPSA**
+(optimise le résultat réel des parties, §20) ou les chantiers de recherche
+(point 4 du recadrage).
