@@ -161,6 +161,14 @@
   `--params` sur le même binaire, match A/B, livre neutralisé/restauré).
   Infrastructure validée ; voir `DEVELOPMENT.md` §19-20.
 
+### Outillage — tuning d'éval à grande échelle (dataset Lichess)
+
+- `scripts/gen_dataset.py` lit les `.pgn.zst` et accepte `--max`.
+- Dataset **100 000 positions (~97 400 distinctes)** depuis Lichess CC0
+  (parties humaines variées) ; pipeline Texel (`scripts/tune.py`) validé
+  (MSE réduite sur tranche 10k). Validation du jeu tuné **imposée par SPRT
+  300 parties** (jamais sur la seule MSE). Voir `DEVELOPMENT.md` §21.
+
 ### Performance
 - Harnais `--bench [profondeur]` (8 positions, nœuds/s).
 - Intrinsèques bits (`popcnt`/`bsf`) via shim C + `-mpopcnt -mbmi`, inlining

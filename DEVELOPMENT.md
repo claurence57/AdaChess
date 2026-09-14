@@ -997,3 +997,37 @@ vient du **résultat réel des parties**, pas de l'erreur statique) :
 Statut : infrastructure validée par smoke test. Un run utile demande plusieurs
 heures de calcul (à 1+0.1, ~300 parties pour trancher un petit écart) ; le
 meilleur jeu devra être **re-validé par un SPRT 300 parties** à cadence réelle.
+
+---
+
+## 21. Tuning d'éval à grande échelle — dataset Lichess CC0
+
+Le tuner Texel (`scripts/tune.py`) avait échoué sur 240 parties d'auto-jeu
+(5 801 positions, § 7sexies). La piste est reprise **à la bonne échelle** exigée
+par le recadrage : un dataset beaucoup plus grand et **divers** (parties
+humaines, pas de l'auto-jeu à profondeur fixe).
+
+- **`scripts/gen_dataset.py`** accepte désormais les `.pgn.zst` (décompression à
+  la volée) et une limite `--max`.
+- **Corpus** : Lichess standard **CC0**
+  (`database.lichess.org/standard/lichess_db_standard_rated_2013-01.pgn.zst`,
+  16 Mo) → dataset **100 000 positions, ~97 400 distinctes** (échantillonnage
+  1 ply sur 4 après l'ouverture), généré en 18 s.
+- **Validation pipeline** : `tune.py` (descente de coordonnées, MSE sigmoïde,
+  garde train **et** validation) réduit l'objectif sur une tranche de 10k
+  (0,2226 → 0,2131 en 1 round, 18 s).
+
+Protocole prévu (fenêtre de quelques dizaines de minutes) : générer les 100k,
+lancer `tune.py`, puis **valider le jeu obtenu par un SPRT 300 parties vs HEAD**
+— les règles d'or interdisent d'adopter sur la seule MSE. Le SPRT d'un jeu de
+`--params` se fait via un **wrapper** (comme `scripts/spsa.py` en génère) :
+
+```bash
+python3 scripts/gen_dataset.py --max 100000 /tmp/opencode/lichess_dataset.txt \
+    /tmp/opencode/lichess_2013-01.pgn.zst
+python3 scripts/tune.py /tmp/opencode/lichess_dataset.txt --rounds 6 \
+    --out /tmp/opencode/tuned_lichess.txt
+printf '#!/bin/sh\nexec "$PWD/bin_bb/adachess_bb" --params /tmp/opencode/tuned_lichess.txt "$@"\n' \
+    > /tmp/opencode/tuned_wrap.sh && chmod +x /tmp/opencode/tuned_wrap.sh
+scripts/sprt.sh 1+0.1 0 5 300 7 "$PWD/bin_bb/adachess_bb" /tmp/opencode/tuned_wrap.sh
+```
