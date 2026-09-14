@@ -129,15 +129,27 @@
   **SPRT vs HEAD ≈ −137 Elo, LOS 99,5 %** → revertée.
 - **Version chirurgicale** : zone lointaine ÷2, quadratique plafonné à 400,
   `P_King_Danger = 60`. Corrige aussi le blunder et améliore la calibration
-  (biais décision +10 vs +53) mais **SPRT ≈ −98 Elo, LOS 97 %** → revertée.
+  (biais décision +10 vs +53) mais **SPRT 300 parties ≈ −96 Elo** (HEAD
+  +96,2 ± 36,4, LOS 100 %) → revertée.
 - Détails et leçon en `DEVELOPMENT.md` §17.
 
-### Recherche — extensions (résultats négatifs)
+### Recherche — extensions, IID, checks en quiescence (résultats)
 
 - **Extension en échec** : arbre ×2,8 (2,19 M nœuds), ne corrige pas le coup
   ciblé → revertée.
 - **Extension « recapture »** : arbre ×3,1 (2,40 M nœuds), ne corrige pas le
-  coup ciblé → revertée. Détails en `DEVELOPMENT.md` §18.
+  coup ciblé → revertée.
+- **IID** : +5 % de nœuds ; SPRT 300 parties = **neutre** (HEAD +6,9 ± 32,5) →
+  non retenu.
+- **Checks en quiescence** : corrige le coup ciblé mais **+49 % de temps** →
+  écarté. Détails en `DEVELOPMENT.md` §18.
+
+### Outillage — harnais A/B équitable
+
+- `sprt.sh`/`ab.sh` désactivent le livre des deux moteurs pendant le match
+  (sinon un binaire de `bin_bb/` utilisait `books/book.bin` et pas l'autre) ;
+  contrôle HEAD vs HEAD à 40 parties = ±87 Elo → décisions en 300 parties
+  (±33-36). Voir `DEVELOPMENT.md` §15.4.
 
 ### Performance
 - Harnais `--bench [profondeur]` (8 positions, nœuds/s).

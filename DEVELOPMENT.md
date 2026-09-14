@@ -836,6 +836,24 @@ est d'environ +300 Elo.)
   profondeur/nœuds fixes, puis confirmer en cadence réelle.
 - Conserver les PGN (chemin imprimé en fin de script) pour inspecter les parties.
 
+### 15.4 Fairness et taille d'échantillon
+
+Deux pièges découverts en mesurant les tentatives des §17-18 :
+
+- **Livre asymétrique** : la recherche de livre par défaut regarde à côté de
+  l'exécutable **et de son parent**. Un binaire dans `bin_bb/` trouvait donc
+  `books/book.bin` (parent = dépôt) alors qu'un binaire dans `/tmp` non : NEW
+  jouait des coups de livre, OLD non. `sprt.sh` et `ab.sh` **désactivent
+  maintenant le livre des deux côtés** pendant le match (et le restaurent) ; la
+  suite d'ouvertures fournit la variété. Les A/B antérieurs sont donc à
+  considérer avec prudence.
+- **Taille d'échantillon** : un contrôle **HEAD vs HEAD** (binaires identiques)
+  a donné **41,2 %** (LOS 8 %) sur 40 parties, soit un écart apparent de ±60 Elo
+  pour des moteurs identiques — la barre d'erreur à 40 parties est **±87 Elo**.
+  À **300 parties** elle tombe à **±33-36 Elo**. Ne rien trancher sous ~300
+  parties ; seuls les écarts objectifs (`--bench` nœuds/temps) peuvent écarter un
+  candidat plus tôt.
+
 ---
 
 ## 16. Build portable (sans POPCNT/BMI)
@@ -893,14 +911,16 @@ ont été tentées, chacune : corrige le blunder ciblé, mais **régresse en for
   **quadratique plafonné à 400**, `P_King_Danger = 60`.
 - Calibration : ouvertures |biais| **69** (vs 63 sans terme), biais décision
   **+10** (vs +53) ; **#10 joue `f6e6`** à depth 12.
-- **SPRT vs HEAD : OLD 22-11-7 (63,7 %), ≈ −98 Elo, LOS 97 % → régression nette.
-  Revertée.**
+- **SPRT vs HEAD (300 parties, livre neutralisé) : OLD 161-80-59 (63,5 %),
+  HEAD +96,2 ± 36,4 Elo, LOS 100 % → régression confirmée** (le −98 vu sur 40
+  parties était réel, ce n'était pas du bruit). **Revertée.**
 
 ### 17.3 Leçon
 
 Le terme « sent » bien l'attaque (corrige le blunder, améliore la calibration
 sur les positions critiques) mais **pénalise trop de positions saines** : le
-coût dépasse le gain sur 40 parties, aux deux réglages. Un bon terme de
+coût dépasse le gain (confirmé à 300 parties pour la version chirurgicale). Un
+bon terme de
 sécurité du roi demande un **modèle plus fin** (attaquants réellement actifs,
 phases, lignes ouvertes) **et un tuning automatique**, pas un patch de
 constantes. Piste suivante : côté **recherche** (profondeur effective sur les
@@ -908,7 +928,7 @@ lignes forcées), documentée en §18.
 
 ---
 
-## 18. Extensions de recherche — tentatives (résultats négatifs)
+## 18. Recherche — extensions, IID, checks en quiescence (résultats)
 
 Pour voir la réfutation de `f6g5` (§17) **sans toucher l'éval**, deux extensions
 standard ont été essayées dans `bbchess-search.adb`, mesurées par `--bench 9`
@@ -922,11 +942,18 @@ standard ont été essayées dans `bbchess-search.adb`, mesurées par `--bench 9
   arbre **×3,1** (2 400 061 nœuds / 1,86 s) ; #10 joue toujours `f6g5`.
   **Revertée.**
 
-Leçon : à cadence fixe, ces extensions font perdre plus de profondeur qu'elles
-n'en rendent sur la ligne visée. Une amélioration côté recherche demande
-davantage (checks en quiescence bornés par une profondeur de quiescence, IID,
-meilleur ordonnancement) et sa **propre campagne SPRT**.
+- **IID** (recherche itérative interne quand aucun coup TT n'est disponible) :
+  +5 % de nœuds ; SPRT **300 parties** vs HEAD → HEAD 51,0 %, **+6,9 ± 32,5 Elo,
+  LOS 66 %** = **neutre** → non retenu.
+- **Checks en quiescence** (échecs calmes générés au 1er ply de quiescence) :
+  **corrige #10** (`f6g5` → `f6e6`) mais **+49 % de temps** à nœuds quasi égaux
+  (knps ÷ 1,4) → écarté.
 
-Bilan des §17-18 : ni le réglage de l'éval, ni les extensions simples ne
+Leçon : à cadence fixe, extensions et checks en quiescence font perdre plus de
+profondeur qu'ils n'en rendent sur la ligne visée ; l'IID, lui, est neutre. Une
+amélioration côté recherche demande un ordonnancement/élagage plus fins et sa
+**propre campagne SPRT de 300 parties** (cf. §15.4).
+
+Bilan des §17-18 : ni le réglage de l'éval, ni les extensions/IID/checks ne
 corrigent le point faible sans coût net. `--selftest` reste vert et le bench
 revient à 780 851 nœuds après chaque revert.
