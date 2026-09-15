@@ -721,10 +721,11 @@ cherché un ply plus profond.
 - Coût mesuré : `--bench 11` 2,62 M → **2,95 M nœuds (+12,5 %)**, temps +17 %.
   `--selftest` vert.
 - A/B self-play (60 parties, 1 s+0,1 s) : **neutre** (PRE +5,8 ± 67,9 Elo,
-  LOS 57 %). Conservé (technique standard, demandée) mais **gain non démontré**
-  à cette cadence — à re-mesurer en SPRT sur plusieurs centaines de parties.
-
-Prochaine étape : Syzygy.
+  LOS 57 %).
+- **SPRT 300 parties** (harnais à livre neutralisé) : **neutre** (OLD 93-97-110
+  → singular **+4,6 ± 31,3 Elo**, LOS 38,6 %) tout en coûtant des nœuds
+  (`--bench 11` +12,5 %). → **retirée**, avec le paramètre `Excluded` devenu
+  inutile (commit `f17f217`).
 
 ---
 
@@ -809,6 +810,11 @@ le SPRT teste un **effet minimal** et rend un verdict PASS/FAIL.
 - **Contrainte de comptage** : pour deux moteurs, `cutechess` joue
   `rounds × games` parties ; le script fixe `-games 2 -rounds max_games/2`
   pour jouer chaque ouverture dans les deux couleurs.
+- **Ordre des moteurs** : `cutechess-cli` applique le SPRT au **premier** moteur
+  listé. `sprt.sh` place donc **NEW en premier** ; sinon un NEW nettement
+  meilleur produisait un LLR **négatif** et les libellés PASS/FAIL sortaient
+  **inversés** (vérifié : OLD = `bb-1.0`, NEW = HEAD ~+300 Elo → OLD 15 %,
+  « -301 ± 90 Elo », LLR **négatif** avec l'ancien ordre).
 
 ```
 scripts/sprt.sh [tc] [elo0] [elo1] [max_games] [seed] [old] [new]
@@ -853,6 +859,11 @@ Deux pièges découverts en mesurant les tentatives des §17-18 :
   À **300 parties** elle tombe à **±33-36 Elo**. Ne rien trancher sous ~300
   parties ; seuls les écarts objectifs (`--bench` nœuds/temps) peuvent écarter un
   candidat plus tôt.
+- **Reproductibilité** : la recherche temporisée étant non déterministe, la
+  **même graine** ne rejoue pas les mêmes parties (constaté avec la graine 7 :
+  OLD 34-32-53 à la 119ᵉ partie d'un run contre 47-32-40 dans un autre).
+  Relancer un SPRT avec la même graine donne donc un **échantillon
+  indépendant**, pas une continuation.
 
 ---
 
@@ -1040,3 +1051,30 @@ grande échelle et avec des parties humaines variées, la **MSE reste déconnect
 de la force** ; le tuning Texel n'est pas le bon levier. Reste l'option **SPSA**
 (optimise le résultat réel des parties, §20) ou les chantiers de recherche
 (point 4 du recadrage).
+
+---
+
+## 22. ProbCut — résultat non concluant (retiré)
+
+Chantier 4 du recadrage (élagage tactique). Le bloc ProbCut est inséré **avant
+l'ordonnancement** dans `Negamax` : sur les coups tactiques, à
+`Depth ≥ ProbCut_Min_Depth = 5`, jusqu'à `ProbCut_Max_Moves = 2` coups dont le
+SEE atteint `ProbCut_Margin = 200`, on cherche une version réduite de
+`ProbCut_Depth = 4` plis en fenêtre nulle autour de `β + marge` ; un score qui
+dépasse `β` coupe le nœud.
+
+- **Efficacité** : `--bench 9` 801 778 → **764 828 nœuds (−4,6 %)**,
+  `--selftest` vert. Mais le banc diagnostique **régresse** : 16 → 13 coups
+  corrects sur 40 (perte moyenne +0,16 → −0,13).
+- **SPRT 300 parties** (graine 7) : OLD (HEAD) 87-100-113 [47,8 %] →
+  ProbCut **+15,1 ± 31,1 Elo**, LOS 82,9 % → **INCONCLUSIF**.
+- **SPRT 600 parties** (graine 7, échantillon **indépendant** car les parties ne
+  sont pas reproductibles, cf. §15.4) : OLD 193-175-232 [51,5 %] →
+  ProbCut **−10,4 ± 21,8 Elo**, LOS 82,6 % pour HEAD → **INCONCLUSIF**.
+
+Les deux échantillons encadrent zéro (cumul ≈ 0) : **aucun gain de force
+démontré**, alors que le patch ajoute un chemin de code et dégrade le banc
+diagnostique. → **retiré** (patch conservé hors dépôt :
+`/tmp/opencode/probcut.patch`). Leçon : deux SPRT (300 puis 600 parties) peuvent
+tomber de part et d'autre de zéro ; un patch neutre au sens du SPRT est rejeté,
+conformément à la règle « ne jamais valider un patch sauf SPRT ».

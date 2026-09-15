@@ -79,7 +79,10 @@
   +1 ply si les alternatives sont nettement moins bonnes ; TT ni lue ni écrite
   pendant le probe.
 - Coût : `--bench 11` +12,5 % de nœuds (+17 % temps). A/B self-play 60 parties :
-  **neutre** (PRE +5,8 ± 67,9 Elo, LOS 57 %). Conservé, gain à confirmer en SPRT.
+  **neutre** (PRE +5,8 ± 67,9 Elo, LOS 57 %).
+- **SPRT 300 parties** : **neutre** (singular `+4,6 ± 31,3 Elo`, LOS 38,6 %) →
+  technique et paramètre `Excluded` **retirés** (commit `f17f217`). Voir
+  `DEVELOPMENT.md` §13.
 
 ### Évaluation — optimisations mesurées (prompt `/tmp/kk`)
 
@@ -109,6 +112,13 @@
   équilibrées (4-6 plis, SAN validé par `python-chess`) ; chaque position est
   jouée dans les deux couleurs (`-repeat`) pour supprimer le biais de couleur
   et décorréler les parties.
+- **Ordre des moteurs (corrigé)** : `cutechess-cli` applique le SPRT au
+  **premier** moteur ; `sprt.sh` liste désormais **NEW en premier** (sinon un
+  NEW nettement meilleur donnait un LLR négatif et les verdicts PASS/FAIL
+  sortaient inversés).
+- **Reproductibilité** : la recherche temporisée étant non déterministe, la même
+  graine ne rejoue pas les mêmes parties ; « prolonger » un SPRT donne un
+  échantillon indépendant (voir `DEVELOPMENT.md` §15.4).
 - Protocole documenté en `DEVELOPMENT.md` §15.
 
 ### Outillage — build portable (sans POPCNT/BMI)
@@ -144,6 +154,17 @@
 - **Checks en quiescence** : corrige le coup ciblé mais **+49 % de temps** →
   écarté. Détails en `DEVELOPMENT.md` §18.
 
+### Recherche — ProbCut : essayé puis retiré
+
+- Bloc ProbCut avant l'ordonnancement (coups tactiques de SEE ≥
+  `ProbCut_Margin`, `Depth ≥ 5`, jusqu'à 2 coups, recherche réduite de 4 plis en
+  fenêtre nulle) : `--bench 9` **−4,6 %** de nœuds mais banc diagnostique
+  **dégradé** (16 → 13 coups corrects sur 40).
+- **SPRT 300 parties** : ProbCut **+15,1 ± 31,1 Elo** (LOS 82,9 %) →
+  INCONCLUSIF. **SPRT 600 parties** (échantillon indépendant) : **−10,4 ± 21,8
+  Elo** (LOS 82,6 % pour HEAD) → INCONCLUSIF. Cumul ≈ 0 : **aucun gain démontré**
+  → **retiré**. Voir `DEVELOPMENT.md` §22.
+
 ### Outillage — harnais A/B équitable
 
 - `sprt.sh`/`ab.sh` désactivent le livre des deux moteurs pendant le match
@@ -171,6 +192,13 @@
 - **Résultat : négatif.** Le jeu tuné (100k positions, 6 rounds) réduit la MSE
   mais **perd ≈ 38 Elo** en SPRT 300 parties vs HEAD → **rejeté**. La MSE reste
   déconnectée de la force à cette échelle.
+
+### Documentation — `src_bb/doc/`
+
+- Nouveau dossier `src_bb/doc/` : 7 fichiers Markdown (français) expliquant les
+  principes du moteur — bitboards, évaluation, recherche, finales, ouvertures,
+  outillage/tests — avec diagrammes Mermaid et liens Chess Programming Wiki.
+  Index dans `src_bb/doc/README.md`.
 
 ### Performance
 - Harnais `--bench [profondeur]` (8 positions, nœuds/s).
