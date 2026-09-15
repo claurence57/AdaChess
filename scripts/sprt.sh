@@ -84,9 +84,11 @@ else
 fi
 
 # Pipe through tee so the raw cutechess output is kept for verdict parsing.
+# cutechess-cli applies the SPRT to the FIRST engine: keep NEW first, or the
+# PASS/FAIL reading below inverts (verified: OLD=bb-1.0, NEW ~+300 -> negative LLR).
 cutechess-cli \
-  -engine name=OLD cmd="$OLD" proto="$PROTO" dir="$(dirname "$OLD")" \
   -engine name=NEW cmd="$NEW" proto="$PROTO" dir="$(dirname "$NEW")" \
+  -engine name=OLD cmd="$OLD" proto="$PROTO" dir="$(dirname "$OLD")" \
   -each tc="$TC" -maxmoves "$MAXMOVES" \
   -games 2 -rounds "$ROUNDS" -repeat -srand "$SEED" \
   "${OPEN_OPT[@]}" \
