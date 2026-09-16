@@ -188,6 +188,16 @@
 - **SPRT 300 parties vs HEAD : NEW 49,8 %, ≈ −1 ± 31 Elo, LOS 47 %** → **neutre,
   non retenu**. Voir `DEVELOPMENT.md` §24.
 
+### Performance — optimisations guidées par perf (×1,59, arbre identique)
+
+- `pragma Inline` des primitives chaudes, `Piece_At` **O(1)** incrémental,
+  `Is_Tactical`/pièce capturée calculés une fois dans `Order`, `Move_List` sans
+  initialisation, fusion éval mobilité / sécurité‑roi / threats, `ctz`/`popcount`
+  en intrinsèques.
+- `--bench 9` 0,517 → 0,325 s (**×1,59**) et `--bench 11` ×1,60 ; **nœuds
+  inchangés** (801 778 / 2 618 135), `--selftest` vert, perft 1→5 inchangé,
+  build `portable` vérifié. Voir `DEVELOPMENT.md` §25.
+
 ### Outillage — harnais A/B équitable
 
 - `sprt.sh`/`ab.sh` désactivent le livre des deux moteurs pendant le match

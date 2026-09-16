@@ -1163,3 +1163,34 @@ confirmée négative (≈ −125 Elo, répliquée) ; 2. SPSA → inerte en l'ét
 déplacement de paramètre) ; 3. multi-cut → négatif (≈ −49 Elo) ; 4. outposts →
 neutre. Aucune de ces pistes n'ouvre de gain ; le harnais SPRT corrigé (§15) et
 le banc diagnostique (§19) restent les outils de référence.
+
+---
+
+## 25. Optimisations CPU guidées par `perf` (×1,59, arbre identique)
+
+Profilage par `sudo perf record -F 999 -g` (bench 11) : `Positional_Score`
+23 %, `Generate_Legal_Common` 18 %, `Negamax` 16 %, `Order` 6 %, `Quiescence`
+4 %, attaques glissantes ~9 %, shims `ctz/popcnt/pext` ~8 %. Optimisations
+retenues, toutes **sémantiquement neutres** (`--bench 9` et `--bench 11`
+gardent exactement **801 778** et **2 618 135** nœuds, `--selftest` vert,
+perft 1→5 inchangé) :
+
+- `pragma Inline` sur les primitives chaudes inter‑unités (attaques glissantes,
+  `Board.Lowest_Bit/Popcount/Piece_At`, `Eval.Piece_Attacks`,
+  `Movegen.Is_Attacked/Pin_Mask`, helpers de `Search`).
+- `Board.Piece_At` en **O(1)** : tableau de 64 cases maintenu de façon
+  incrémentale dans `Put_Piece`/`Remove_Piece` (toute mutation passe par là).
+- `Order`/`Quiescence` : `Is_Tactical` et la pièce capturée calculés **une fois**
+  par coup et portés à travers le tri.
+- `Move_List` en `pragma Suppress_Initialization` (le remplissage à zéro des 256
+  enregistrements coûtait 15 % de la movegen et 63 % de la quiescence).
+- **Fusion d'éval** : les jeux d'attaques déjà calculés pour la mobilité
+  alimentent aussi la sécurité du roi et le bonus `threats`, au lieu de les
+  recalculer dans `King_Safety` ; l'arrondi entier est conservé à l'identique.
+- `bb_popcountll`/`bb_ctzll` importés en `Convention => Intrinsic` (POPCNT/TZCNT
+  en ligne en `release`, repli libgcc en `portable`) ; `bb_pext` inchangé.
+
+**Mesure** (A/B entrelacé, cœur épinglé) : `--bench 9` 0,517 → 0,325 s
+(**×1,59**, 1 552 → 2 467 knps) ; `--bench 11` 1,704 → 1,067 s (×1,60) ;
+instructions retirées **−28 %**. Candidats **rejetés** après mesure : cache
+d'attaques par case, inlining de SEE.
