@@ -101,6 +101,11 @@ def main() -> int:
     ap.add_argument("--binary", default=str(ROOT / "bin_bb" / "adachess_bb"))
     ap.add_argument("--out", default="/tmp/opencode/spsa")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--a", type=float, default=200.0,
+                    help="SPSA a_k numerator (step size); the old hard-coded 6 "
+                         "was ~30-100x too small versus integer rounding")
+    ap.add_argument("--a-offset", type=float, default=10.0,
+                    help="SPSA a_k denominator offset")
     args = ap.parse_args()
 
     rng = random.Random(args.seed)
@@ -111,13 +116,16 @@ def main() -> int:
     work.mkdir(exist_ok=True)
 
     base = dump_params(binary)
-    theta = {k: base[k] for k in TUNABLE if k in base}
+    # theta is kept as float so sub-unit SPSA steps accumulate instead of being
+    # erased by integer rounding; only the engine-facing files are rounded.
+    theta = {k: float(base[k]) for k in TUNABLE if k in base}
     missing = [k for k in TUNABLE if k not in base]
     if missing:
         print(f"warning: tunable params not found: {missing}", file=sys.stderr)
-    c0 = {k: max(1, theta[k] // 8) for k in theta}
-    lo = {k: max(0, theta[k] - 8 * c0[k]) for k in theta}
-    hi = {k: theta[k] + 12 * c0[k] for k in theta}
+    c0 = {k: max(1, int(theta[k]) // 8) for k in theta}
+    lo = {k: max(0, int(theta[k]) - 8 * c0[k]) for k in theta}
+    hi = {k: int(theta[k]) + 12 * c0[k] for k in theta}
+    start = dict(theta)
 
     book_hidden = None
     if BOOK.exists():
@@ -138,7 +146,7 @@ def main() -> int:
     try:
         for k in range(args.iterations):
             ck = {p: c0[p] / (k + 1) ** 0.101 for p in theta}
-            ak = 6.0 / (k + 1 + 10) ** 0.602
+            ak = args.a / (k + 1 + args.a_offset) ** 0.602
             delta = {p: (1 if rng.random() < 0.5 else -1) for p in theta}
             plus = {p: min(hi[p], max(lo[p], round(theta[p] + ck[p] * delta[p])))
                     for p in theta}
@@ -148,17 +156,22 @@ def main() -> int:
             write_params(params_b, minus)
             r = play_match(binary, params_a, params_b, args.games, args.tc,
                            work, args.seed + k)
+            moved = 0.0
             for p in theta:
                 grad = (r - 0.5) * delta[p] / ck[p]
-                theta[p] = min(hi[p], max(lo[p], round(theta[p] + ak * grad)))
+                theta[p] = min(float(hi[p]),
+                               max(float(lo[p]), theta[p] + ak * grad))
+                moved = max(moved, abs(theta[p] - start[p]))
             with log.open("a") as f:
-                f.write(f"iter {k:3d} score(+)={r:.3f} "
-                        f"theta={{{', '.join(f'{p}:{theta[p]}' for p in theta)}}}\n")
-            write_params(out / "params_current.txt", theta)
-            print(f"iter {k:3d} score(+)={r:.3f}")
+                f.write(f"iter {k:3d} score(+)={r:.3f} max_move={moved:.3f} "
+                        f"theta={{{', '.join(f'{p}:{theta[p]:.2f}' for p in theta)}}}\n")
+            write_params(out / "params_current.txt",
+                         {p: int(round(v)) for p, v in theta.items()})
+            print(f"iter {k:3d} score(+)={r:.3f} max_move={moved:.3f}")
     finally:
         restore_book()
-    write_params(out / "params_final.txt", theta)
+    write_params(out / "params_final.txt",
+                 {p: int(round(v)) for p, v in theta.items()})
     print(f"done; parameters in {out}")
     return 0
 
