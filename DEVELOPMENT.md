@@ -937,6 +937,26 @@ phases, lignes ouvertes) **et un tuning automatique**, pas un patch de
 constantes. Piste suivante : côté **recherche** (profondeur effective sur les
 lignes forcées), documentée en §18.
 
+### 17.4 Revérification (15/09) — harnais corrigé
+
+Le −137 Elo de §17.1 avait été mesuré le 13/09 à 17h17, **avant** le correctif
+de neutralisation du livre (13/09 18h26) : il était donc suspect. Le patch
+« version forte » a été **reconstruit à l'identique** (zone 5×5, unités d'attaque
+C/F=2, T=3, D=5, pion=1, danger non linéaire `Unités² × P_King_Danger / 10`
+plafonné à 1200, `P_King_Danger = 40`) dans un worktree **hors dépôt**, puis
+re-mesuré avec `sprt.sh` corrigé (livre neutralisé des deux côtés, NEW en
+premier) :
+
+- `--selftest` vert, perft 1→5 inchangé ; `--bench 9` 801 778 → **1 035 199
+  nœuds** ; banc diagnostic **16 → 17/40** (le terme « sent » bien l'attaque).
+- **SPRT 300 parties vs HEAD (1+0.1) : OLD 168-65-67, NEW 32,8 %, ≈ −124 ± 36
+  Elo, LOS 0 %, LLR −2,03 → INCONCLUSIF au plafond (négatif net).**
+
+**Conclusion** : le verdict de §17.1 est **confirmé** (≈ −124 vs −137, même
+LOS 0 %) ; ce n'était pas un artefact du bug de livre. La « version forte »
+reste **revertée** (aucun merge) : un terme de sécurité du roi correct exige un
+modèle plus fin + un tuning automatique validé par SPRT (règle d'or 3).
+
 ---
 
 ## 18. Recherche — extensions, IID, checks en quiescence (résultats)

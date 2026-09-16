@@ -142,6 +142,11 @@
   (biais décision +10 vs +53) mais **SPRT 300 parties ≈ −96 Elo** (HEAD
   +96,2 ± 36,4, LOS 100 %) → revertée.
 - Détails et leçon en `DEVELOPMENT.md` §17.
+- **Revérification (15/09)** : patch « version forte » reconstruit hors dépôt et
+  re-mesuré avec le harnais corrigé (livre neutralisé, NEW en premier) :
+  **≈ −124 ± 36 Elo** en 300 parties vs HEAD (LOS 0 %) → le −137 original est
+  **confirmé**, ce n'était pas un artefact de livre. Toujours reverté.
+  `DEVELOPMENT.md` §17.4.
 
 ### Recherche — extensions, IID, checks en quiescence (résultats)
 
