@@ -951,6 +951,8 @@ premier) :
   nœuds** ; banc diagnostic **16 → 17/40** (le terme « sent » bien l'attaque).
 - **SPRT 300 parties vs HEAD (1+0.1) : OLD 168-65-67, NEW 32,8 %, ≈ −124 ± 36
   Elo, LOS 0 %, LLR −2,03 → INCONCLUSIF au plafond (négatif net).**
+- **Réplication indépendante** (graine 13, 300 parties) : NEW 32,7 %,
+  ≈ **−125,7 ± 36,2 Elo**, LOS 0 % → mesure **reproductible** (−124 / −126).
 
 **Conclusion** : le verdict de §17.1 est **confirmé** (≈ −124 vs −137, même
 LOS 0 %) ; ce n'était pas un artefact du bug de livre. La « version forte »
@@ -1020,7 +1022,7 @@ vient du **résultat réel des parties**, pas de l'erreur statique) :
 
 - compare **deux jeux de paramètres avec le même binaire** via des wrappers
   `--params` (aucun rebuild) ;
-- perturbation simultanée ±c de 36 paramètres d'éval (hors matériel), match
+- perturbation simultanée ±c de 35 paramètres d'éval (hors matériel), match
   A/B, mise à jour SPSA (pas `c_k = c0/(k+1)^0.101`, `a_k = 6/(k+1+10)^0.602`) ;
 - livre neutralisé (fairness) et **restauré même en cas d'arrêt** (signal/
   `finally`) ; snapshots `params_current.txt` + log par itération.
@@ -1028,6 +1030,24 @@ vient du **résultat réel des parties**, pas de l'erreur statique) :
 Statut : infrastructure validée par smoke test. Un run utile demande plusieurs
 heures de calcul (à 1+0.1, ~300 parties pour trancher un petit écart) ; le
 meilleur jeu devra être **re-validé par un SPRT 300 parties** à cadence réelle.
+
+### 20.1 Run complet (16/09) — arrêté car inerte
+
+Un run de **50 itérations × 200 parties** (1+0.1, ~10 000 parties) a été lancé.
+Après **27 itérations (~18 h)**, le vecteur `theta` était **resté identique aux
+valeurs par défaut** : aucun des 35 paramètres n'a bougé d'une unité. Cause :
+l'incrément
+
+`round (a_k · (r − 0,5) · delta / c_k)`
+
+avec `a_k = 6/(k+11)^0.602 ≈ 1,4`, `c_k = max (1, theta//8)` ≈ 1 à 6 et
+`(r − 0,5) ≈ ±0,02` (bruit de 200 parties) vaut ≈ 0,003 à 0,03 → **arrondi à 0
+systématiquement**. Autrement dit `a_k` est **~30 à 100× trop petit** face à
+l'arrondi entier : le SPSA ne peut structurellement pas franchir un pas. Le run
+a été **arrêté** (livre restauré) ; la revalidation SPRT aurait comparé HEAD à
+HEAD. Piste de correction : augmenter fortement `a_k` (ou co-échelonner les
+paramètres, ou augmenter le nombre de parties) et **valider par un run pilote
+court** que `theta` bouge avant tout run complet.
 
 ---
 
@@ -1098,3 +1118,48 @@ diagnostique. → **retiré** (patch conservé hors dépôt :
 `/tmp/opencode/probcut.patch`). Leçon : deux SPRT (300 puis 600 parties) peuvent
 tomber de part et d'autre de zéro ; un patch neutre au sens du SPRT est rejeté,
 conformément à la règle « ne jamais valider un patch sauf SPRT ».
+
+---
+
+## 23. Multi-cut — résultat négatif (rejeté)
+
+Chantier 3 du recadrage, jamais tenté jusqu'ici. Variante « passe préliminaire
+réduite » dans `Negamax` : à un nœud non‑PV (`Beta − Alpha = 1`), hors échec, à
+`Depth ≥ 6`, on sonde jusqu'à `MultiCut_Max_Probes = 6` coups ordonnés (en
+sautant le premier) avec une fenêtre nulle à `Depth − 4` ; si au moins
+`MultiCut_Moves = 3` sondes atteignent `Beta`, le nœud est coupé sans recherche
+complète.
+
+- `--selftest` vert, perft inchangé ; `--bench 9` 801 778 → **787 300 nœuds
+  (−1,8 %)** (temps en légère hausse).
+- **SPRT 300 parties vs HEAD (1+0.1, graine 7) : OLD 111-69-120, NEW 43,0 %,
+  ≈ −49 ± 31 Elo, LOS 0,1 %, LLR −1,08 → INCONCLUSIF au plafond (négatif net).**
+
+Le multi-cut réduit bien l'arbre mais **coûte de la force** : des coupures
+réduites trop optimistes font manquer des défenses. Comme le ProbCut (§22), la
+technique n'apporte rien dans BB → **non retenue** (patch conservé hors dépôt,
+`/tmp/opencode/adachess_bb_multicut`).
+
+---
+
+## 24. Outposts — résultat neutre (non retenu)
+
+Chantier 4 du recadrage (réserve, ouvert après l'échec des chantiers 1-3). Terme
+d'éval : un cavalier/fou posé sur une case **défendue par un pion ami** et
+**qu'aucun pion ennemi ne peut attaquer**, hors colonne de bord et dans la
+moitié adverse, reçoit un bonus (`P_Outpost_N = 25`, `P_Outpost_B = 10`, terme
+`Both`).
+
+- `--selftest` vert (symétrie et perft inchangés) ; `--bench 9` 801 778 →
+  **901 287 nœuds**.
+- **SPRT 300 parties vs HEAD (1+0.1, graine 7) : OLD 92-91-117, NEW 49,8 %,
+  ≈ −1 ± 31 Elo, LOS 47 %, LLR −0,07 → INCONCLUSIF au plafond (neutre).**
+
+Aucun gain mesurable (terme standard, mais ici neutre) → **non retenu** (binaire
+conservé hors dépôt, `/tmp/opencode/adachess_bb_outposts`).
+
+**Bilan des quatre chantiers du recadrage** : 1. sécurité du roi « forte » →
+confirmée négative (≈ −125 Elo, répliquée) ; 2. SPSA → inerte en l'état (pas de
+déplacement de paramètre) ; 3. multi-cut → négatif (≈ −49 Elo) ; 4. outposts →
+neutre. Aucune de ces pistes n'ouvre de gain ; le harnais SPRT corrigé (§15) et
+le banc diagnostique (§19) restent les outils de référence.

@@ -147,6 +147,8 @@
   **≈ −124 ± 36 Elo** en 300 parties vs HEAD (LOS 0 %) → le −137 original est
   **confirmé**, ce n'était pas un artefact de livre. Toujours reverté.
   `DEVELOPMENT.md` §17.4.
+- **Réplication indépendante** (graine 13, 300 parties) : NEW 32,7 %,
+  ≈ **−125,7 ± 36,2 Elo**, LOS 0 % → mesure **reproductible**.
 
 ### Recherche — extensions, IID, checks en quiescence (résultats)
 
@@ -170,6 +172,22 @@
   Elo** (LOS 82,6 % pour HEAD) → INCONCLUSIF. Cumul ≈ 0 : **aucun gain démontré**
   → **retiré**. Voir `DEVELOPMENT.md` §22.
 
+### Recherche — multi-cut : essayé puis rejeté
+
+- Variante « passe préliminaire réduite » dans `Negamax` (nœud non‑PV, hors
+  échec, `Depth ≥ 6` ; jusqu'à 6 coups sondés à `Depth − 4` en fenêtre nulle ;
+  coupure si ≥ 3 dépassent `Beta`). `--selftest` vert, `--bench 9` 801 778 →
+  **787 300** nœuds.
+- **SPRT 300 parties vs HEAD : NEW 43,0 %, ≈ −49 ± 31 Elo, LOS 0,1 %** →
+  régression nette, **non retenu**. Voir `DEVELOPMENT.md` §23.
+
+### Évaluation — outposts : neutre (non retenu)
+
+- Terme outpost (cavalier/fou sur case défendue par un pion et inattaquable par
+  les pions ennemis) : `P_Outpost_N = 25`, `P_Outpost_B = 10`, `--selftest` vert.
+- **SPRT 300 parties vs HEAD : NEW 49,8 %, ≈ −1 ± 31 Elo, LOS 47 %** → **neutre,
+  non retenu**. Voir `DEVELOPMENT.md` §24.
+
 ### Outillage — harnais A/B équitable
 
 - `sprt.sh`/`ab.sh` désactivent le livre des deux moteurs pendant le match
@@ -186,6 +204,10 @@
 - **`scripts/spsa.py`** : tuner SPSA des paramètres d'éval (deux jeux de
   `--params` sur le même binaire, match A/B, livre neutralisé/restauré).
   Infrastructure validée ; voir `DEVELOPMENT.md` §19-20.
+- **Run SPSA complet (16/09) : arrêté car inerte.** Après 27 itérations (~18 h),
+  `theta` n'avait pas bougé d'une unité (`a_k` ~30-100× trop petit face à
+  l'arrondi entier) ; aucun gain possible, revalidation non lancée. Voir
+  `DEVELOPMENT.md` §20.1.
 
 ### Outillage — tuning d'éval à grande échelle (dataset Lichess)
 
