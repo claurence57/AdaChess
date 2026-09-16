@@ -425,6 +425,7 @@ package body BBChess.Eval is
          when others => return 0;
       end case;
    end Piece_Attacks;
+   pragma Inline (Piece_Attacks);
 
    ----------------------------------
    -- Tapered (phase) scores --
@@ -537,54 +538,29 @@ package body BBChess.Eval is
 
    -- Opening/middlegame safety of Color's king. Positive when the king is
    -- well sheltered, negative when it is exposed / under attack.
+   --
+   -- The weighted enemy attackers aiming at the king's square and its
+   -- neighbourhood (Near_Danger / Far_Danger / Attackers) are supplied by
+   -- the caller: Positional_Score of the *enemy* color already computes the
+   -- exact same Piece_Attacks sets for its mobility term, so accumulating
+   -- the king danger there and passing it here avoids a second scan of the
+   -- board (the sums are identical, so the score is unchanged).
    function King_Safety (Position : in Position_Type;
-                         Color    : in Color_Type;
-                         Occ      : in Bitboard) return Score_Type
+                          Color    : in Color_Type;
+                          Near_Danger : in Score_Type;
+                          Far_Danger  : in Score_Type;
+                          Attackers   : in Natural) return Score_Type
    is
       Enemy    : constant Color_Type := Opposite (Color);
       King_Sq  : constant Square_Type :=
         Lowest_Bit (Position.Pieces (Make (Color, King)));
       King_File : constant Natural := File_Of (King_Sq);
-      -- The king square itself is included so that a direct check counts.
-      Near     : constant Bitboard := Near_Zone (King_Sq);
-      Far      : constant Bitboard := Far_Zone (King_Sq);
-      Near_Danger : Score_Type := 0;
-      Far_Danger  : Score_Type := 0;
-      Attackers   : Natural := 0;
       Result    : Score_Type := 0;
       Lo, Hi   : Integer;
       B        : Bitboard;
    begin
-      -- Weighted enemy attackers aiming at the king's square or the squares
-      -- around it. The danger is applied non-linearly (a coordinated attack
-      -- by several pieces is much worse than the sum of the attackers).
-      for Kind in Knight .. Queen loop
-         declare
-            W : constant Score_Type :=
-              (case Kind is
-                  when Knight => King_Attack_Knight,
-                  when Bishop => King_Attack_Bishop,
-                  when Rook   => King_Attack_Rook,
-                  when Queen  => King_Attack_Queen,
-                  when others => 0);
-            Pieces : Bitboard := Position.Pieces (Make (Enemy, Kind));
-         begin
-            while Pieces /= 0 loop
-               declare
-                  Sq  : constant Square_Type := Lowest_Bit (Pieces);
-                  Att : constant Bitboard := Piece_Attacks (Kind, Sq, Occ);
-               begin
-                  if (Att and Near) /= 0 then
-                     Attackers := Attackers + 1;
-                     Near_Danger := Near_Danger + W;
-                  elsif (Att and Far) /= 0 then
-                     Far_Danger := Far_Danger + W / 2;
-                  end if;
-               end;
-               Pieces := Pieces and (Pieces - 1);
-            end loop;
-         end;
-      end loop;
+      -- The danger is applied non-linearly (a coordinated attack by several
+      -- pieces is much worse than the sum of the attackers).
       Result := Result
         - (Near_Danger * Score_Type (Attackers + 1)) / 2
         - Far_Danger;
@@ -669,9 +645,12 @@ package body BBChess.Eval is
    -- the opening and the endgame values. Color-generic, so calling it with
    -- White then Black and subtracting stays symmetric.
    function Positional_Score (Position : in Position_Type;
-                              Color    : in Color_Type;
-                              Phase    : in Natural;
-                              Occ      : in Bitboard) return Tapered_Score_Type
+                               Color    : in Color_Type;
+                               Occ      : in Bitboard;
+                               Near_Danger : out Score_Type;
+                               Far_Danger  : out Score_Type;
+                               Attackers   : out Natural)
+     return Tapered_Score_Type
    is
       Enemy    : constant Color_Type := Opposite (Color);
       Own      : constant Bitboard := Color_Board (Position, Color);
@@ -685,9 +664,24 @@ package body BBChess.Eval is
         or Position.Pieces (Make (Enemy, Queen));
       Enemy_King  : constant Square_Type :=
         Lowest_Bit (Position.Pieces (Make (Enemy, King)));
+      -- Enemy rooks/queens: used by the minor-piece threat bonus, computed
+      -- below from the same attack sets as the mobility term.
+      Majors : constant Bitboard :=
+        Position.Pieces (Make (Enemy, Rook))
+        or Position.Pieces (Make (Enemy, Queen));
+      -- The king square itself is included so that a direct check counts.
+      Near     : constant Bitboard := Near_Zone (Enemy_King);
+      Far      : constant Bitboard := Far_Zone (Enemy_King);
       Result   : Tapered_Score_Type := (Opening => 0, End_Game => 0);
       B        : Bitboard;
    begin
+      -- Enemy-king danger posed by Color's pieces, accumulated below along
+      -- the mobility loop (same attack sets) and consumed by the enemy's
+      -- King_Safety term in Static.
+      Near_Danger := 0;
+      Far_Danger  := 0;
+      Attackers   := 0;
+
       -- Bishop pair.
       if Popcount (Position.Pieces (Make (Color, Bishop))) = 2 then
          Result := Result +
@@ -704,17 +698,56 @@ package body BBChess.Eval is
                   when Rook   => Mobility_R,
                   when Queen  => Mobility_Q,
                   when others => 0);
+            Attack_Weight : constant Score_Type :=
+              (case Kind is
+                  when Knight => King_Attack_Knight,
+                  when Bishop => King_Attack_Bishop,
+                  when Rook   => King_Attack_Rook,
+                  when Queen  => King_Attack_Queen,
+                  when others => 0);
          begin
             B := Position.Pieces (Make (Color, Kind));
             while B /= 0 loop
                declare
                   Sq  : constant Square_Type := Lowest_Bit (B);
-                  Cnt : constant Natural :=
-                    Popcount (Piece_Attacks (Kind, Sq, Occ) and Free);
+                  A   : constant Bitboard := Piece_Attacks (Kind, Sq, Occ);
                begin
-                   Result := Result + Both (Weight * Score_Type (Cnt));
+                  Result := Result +
+                    Both (Weight * Score_Type (Popcount (A and Free)));
 
-                   if Kind = Rook then
+                  -- Weighted attacker of the enemy king (mirrors the old
+                  -- King_Safety scan, now sharing this attack set).
+                  if (A and Near) /= 0 then
+                     Attackers := Attackers + 1;
+                     Near_Danger := Near_Danger + Attack_Weight;
+                  elsif (A and Far) /= 0 then
+                     Far_Danger := Far_Danger + Attack_Weight / 2;
+                  end if;
+
+                  -- Minor-piece threat: a knight/bishop attacking an enemy
+                  -- rook or queen (same attack set as the mobility term).
+                  if Kind in Knight | Bishop then
+                     declare
+                        Hit : Bitboard := A and Majors;
+                     begin
+                        while Hit /= 0 loop
+                           declare
+                              Sq2 : constant Square_Type := Lowest_Bit (Hit);
+                              Pc  : Piece_Type;
+                           begin
+                              if Piece_At (Position, Sq2, Pc) then
+                                 Result := Result +
+                                   Both (Threat_Minor
+                                         * Piece_Value
+                                             (BBChess.Pieces.Kind (Pc)) / 100);
+                              end if;
+                           end;
+                           Hit := Hit and (Hit - 1);
+                        end loop;
+                     end;
+                  end if;
+
+                  if Kind = Rook then
                       declare
                          Fm : constant Bitboard := File_Mask (File_Of (Sq));
                       begin
@@ -871,38 +904,6 @@ package body BBChess.Eval is
          end;
       end;
 
-      -- Minor pieces attacking enemy rooks or queens.
-      declare
-         Majors : constant Bitboard :=
-           Position.Pieces (Make (Enemy, Rook))
-           or Position.Pieces (Make (Enemy, Queen));
-      begin
-         for K in Knight .. Bishop loop
-            B := Position.Pieces (Make (Color, K));
-            while B /= 0 loop
-               declare
-                  Sq  : constant Square_Type := Lowest_Bit (B);
-                  Hit : Bitboard := Piece_Attacks (K, Sq, Occ) and Majors;
-               begin
-                  while Hit /= 0 loop
-                     declare
-                        Sq2 : constant Square_Type := Lowest_Bit (Hit);
-                        Pc  : Piece_Type;
-                     begin
-                        if Piece_At (Position, Sq2, Pc) then
-                           Result := Result +
-                             Both (Threat_Minor
-                                   * Piece_Value (Kind (Pc)) / 100);
-                        end if;
-                     end;
-                     Hit := Hit and (Hit - 1);
-                  end loop;
-               end;
-               B := B and (B - 1);
-            end loop;
-         end loop;
-      end;
-
       -- King: endgame activity replaces the home-oriented PST.
       declare
          King_Sq : constant Square_Type :=
@@ -915,10 +916,8 @@ package body BBChess.Eval is
             End_Game => King_End_PST (K_Row, K_File) - PST (King, Color, King_Sq));
       end;
 
-      -- King safety (middlegame only).
-      if Phase >= King_Safety_Min_Phase then
-         Result := Result + Both (King_Safety (Position, Color, Occ));
-      end if;
+      -- King safety (middlegame only) is applied by Static, which has the
+      -- enemy-king danger produced by this color's mobility scan above.
 
       return Result;
    end Positional_Score;
@@ -927,6 +926,12 @@ package body BBChess.Eval is
       Result : Score_Type := 0;
       Phase  : constant Natural := Game_Phase (Position);
       Occ    : constant Bitboard := Occupancy (Position);
+      -- Danger each color's pieces pose to the enemy king, collected while
+      -- the mobility term computes their attack sets (see Positional_Score).
+      W_Near, W_Far : Score_Type;
+      W_Att         : Natural;
+      B_Near, B_Far : Score_Type;
+      B_Att         : Natural;
    begin
       -- Material + piece-square tables: maintained incrementally by
       -- Make_Move / Unmake_Move (White-positive).
@@ -934,14 +939,32 @@ package body BBChess.Eval is
 
       -- Positional terms, tapered by the game phase.
       declare
-         White_Positional : constant Tapered_Score_Type :=
-           Positional_Score (Position, White, Phase, Occ);
-         Black_Positional : constant Tapered_Score_Type :=
-           Positional_Score (Position, Black, Phase, Occ);
-         Diff : constant Tapered_Score_Type :=
+         White_Positional : Tapered_Score_Type :=
+           Positional_Score (Position, White, Occ, W_Near, W_Far, W_Att);
+         Black_Positional : Tapered_Score_Type :=
+           Positional_Score (Position, Black, Occ, B_Near, B_Far, B_Att);
+         Diff : Tapered_Score_Type;
+      begin
+         -- King safety (middlegame only), per color. It must be folded into
+         -- the per-color tapered scores *before* the single Blend below:
+         -- splitting the division would change the truncation of negative
+         -- intermediate sums. Each term is flat (equal opening / endgame
+         -- values), so folding Both(KS) here is the previous arithmetic.
+         if Phase >= King_Safety_Min_Phase then
+            declare
+               KS_W : constant Score_Type :=
+                 King_Safety (Position, White, B_Near, B_Far, B_Att);
+               KS_B : constant Score_Type :=
+                 King_Safety (Position, Black, W_Near, W_Far, W_Att);
+            begin
+               White_Positional := White_Positional + Both (KS_W);
+               Black_Positional := Black_Positional + Both (KS_B);
+            end;
+         end if;
+
+         Diff :=
            (Opening  => White_Positional.Opening - Black_Positional.Opening,
             End_Game => White_Positional.End_Game - Black_Positional.End_Game);
-      begin
          Result := Result + Blend (Diff, Phase);
       end;
 

@@ -416,8 +416,6 @@ begin
    is
       Pseudo   : Move_List;
       P_Count  : Natural;
-      Undo     : Undo_Info;
-      Work     : Position_Type := Position;
       Side     : constant Color_Type := Position.Side;
       Opp      : constant Color_Type := Opposite (Side);
       Occ      : constant Bitboard := Occupancy (Position);
@@ -461,13 +459,19 @@ begin
                end if;
             elsif M.Flag = En_Passant then
                -- Rare: the make/unmake test covers the rank-discovered and
-               -- check-resolving cases uniformly.
-               Make_Move (Work, M, Undo);
-               if not King_In_Check (Work, Side) then
-                  Count := Count + 1;
-                  Moves (Count) := M;
-               end if;
-               Unmake_Move (Work, M, Undo);
+               -- check-resolving cases uniformly. The working copy is only
+               -- made here (a full Position copy, off the common path).
+               declare
+                  Undo : Undo_Info;
+                  Work : Position_Type := Position;
+               begin
+                  Make_Move (Work, M, Undo);
+                  if not King_In_Check (Work, Side) then
+                     Count := Count + 1;
+                     Moves (Count) := M;
+                  end if;
+                  Unmake_Move (Work, M, Undo);
+               end;
             else
                -- Non-king move: must resolve the check and, when the piece is
                -- absolutely pinned, stay on its pin line.

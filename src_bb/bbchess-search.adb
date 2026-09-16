@@ -81,6 +81,7 @@ package body BBChess.Search is
    -- Two entries form a bucket (even index and the next one).
    function TT_Bucket (Position : in Position_Type) return Natural is
      (Natural (Position.Key and Bitboard (TT_Mask - 1)));
+   pragma Inline (TT_Bucket);
 
    function Adjust_Score (S : Score_Type; Ply : Natural) return Score_Type is
    begin
@@ -91,6 +92,7 @@ package body BBChess.Search is
       end if;
       return S;
    end Adjust_Score;
+   pragma Inline (Adjust_Score);
 
    procedure Clear_Transposition_Table is
    begin
@@ -262,6 +264,7 @@ package body BBChess.Search is
          when King   => return 0;
       end case;
    end Kind_Value;
+   pragma Inline (Kind_Value);
 
    function Is_Tactical (Position : in Position_Type; Move : in Move_Type)
      return Boolean is
@@ -271,8 +274,17 @@ package body BBChess.Search is
       end if;
       return (Color_Board (Position, Opposite (Position.Side)) and Bit (Move.To)) /= 0;
    end Is_Tactical;
+   pragma Inline (Is_Tactical);
 
    History_Max : constant Score_Type := 16_384;
+
+   --  Scratch arrays used by the movers. They are written for every move in
+   --  1 .. Count before the corresponding entry is read, so the per-call
+   --  default initialization (a 1 KB zero fill each) is only overhead.
+   type Order_Array is array (1 .. 256) of Score_Type;
+   type Flag_Array is array (1 .. 256) of Boolean;
+   pragma Suppress_Initialization (Order_Array);
+   pragma Suppress_Initialization (Flag_Array);
 
    -- History bonus of a quiet move that produced a beta cutoff at Depth.
    -- Quadratic in the depth so that deep cutoffs dominate, and capped so a
@@ -286,6 +298,7 @@ package body BBChess.Search is
       end if;
       return B;
    end History_Bonus;
+   pragma Inline (History_Bonus);
 
    procedure Bump_History (Ctx        : in Context_Access;
                            Side       : in Color_Type;
@@ -315,15 +328,19 @@ package body BBChess.Search is
       end if;
       return Pawn;
    end Captured_Kind;
+   pragma Inline (Captured_Kind);
 
    -- Move ordering score: hash move first, then captures (MVV-LVA), then
    -- promotions, then the killers, then quiet moves ordered by the history
    -- heuristic (moves that already produced beta cutoffs elsewhere).
+   -- Tactical is the caller's Is_Tactical result for Move, passed in so the
+   -- (cheap but repeated) test is not run twice per move during ordering.
    function Order (Ctx        : in Context_Access;
                    Position   : in Position_Type;
                    Move       : in Move_Type;
                    Hash_Move  : in Move_Type;
-                   Ply        : in Natural) return Score_Type is
+                   Ply        : in Natural;
+                   Tactical   : in Boolean) return Score_Type is
    begin
       if Move = Hash_Move then
          return 100_000_000;
@@ -333,7 +350,7 @@ package body BBChess.Search is
          return 50_000_000 + Kind_Value (Kind (Move.Promotion));
       end if;
 
-      if Is_Tactical (Position, Move) then
+      if Tactical then
          declare
             Victim   : constant Score_Type :=
               Kind_Value (Captured_Kind (Position, Move));
@@ -353,6 +370,7 @@ package body BBChess.Search is
       end if;
       return Ctx.History (Color (Move.Piece), Move.From, Move.To);
    end Order;
+   pragma Inline (Order);
 
    -- XBoard thinking output ("post"/"nopost"). When enabled, the primary
    -- thread prints one line per completed iteration:
@@ -455,6 +473,7 @@ package body BBChess.Search is
               or Position.Pieces (Make (Color, Rook))
               or Position.Pieces (Make (Color, Queen))) /= 0;
    end Has_Non_Pawn;
+   pragma Inline (Has_Non_Pawn);
 
    -- True for dead positions: king vs king, king + lone minor vs king, and
    -- king + bishop vs king + bishop with both bishops on the same color
@@ -548,12 +567,16 @@ package body BBChess.Search is
 
       -- Move the tactical moves (captures / promotions) to the front, then
       -- order them by MVV so the most promising captures are tried first.
+      -- The victim value is computed once per tactical move (and carried
+      -- through the selection swaps) instead of once per comparison.
       declare
          T : Natural := 0;
+         Vic : Order_Array;
       begin
          for I in 1 .. Count loop
             if Is_Tactical (Position, Moves (I)) then
                T := T + 1;
+               Vic (T) := Kind_Value (Captured_Kind (Position, Moves (I)));
                declare
                   Tmp : constant Move_Type := Moves (T);
                begin
@@ -566,26 +589,23 @@ package body BBChess.Search is
          for I in 1 .. T loop
             declare
                Best_J : Natural := I;
-               Best_V : Score_Type :=
-                 Kind_Value (Captured_Kind (Position, Moves (I)));
+               Best_V : Score_Type := Vic (I);
             begin
                for J in I + 1 .. T loop
-                  declare
-                     V : constant Score_Type :=
-                       Kind_Value (Captured_Kind (Position, Moves (J)));
-                  begin
-                     if V > Best_V then
-                        Best_V := V;
-                        Best_J := J;
-                     end if;
-                  end;
+                  if Vic (J) > Best_V then
+                     Best_V := Vic (J);
+                     Best_J := J;
+                  end if;
                end loop;
                if Best_J /= I then
                   declare
                      Tmp : constant Move_Type := Moves (I);
+                     Tmp_V : constant Score_Type := Vic (I);
                   begin
                      Moves (I) := Moves (Best_J);
                      Moves (Best_J) := Tmp;
+                     Vic (I) := Vic (Best_J);
+                     Vic (Best_J) := Tmp_V;
                   end;
                end if;
             end;
@@ -603,13 +623,13 @@ package body BBChess.Search is
          for I in 1 .. Limit loop
             -- A capture that the static exchange evaluation scores as losing
             -- cannot improve on the stand-pat score, so it is not searched
-            -- (promotions and evasions out of check are always kept).
+            -- (promotions and evasions out of check are always kept). For a
+            -- non-check node the loop only walks the tactical prefix, whose
+            -- victim value is already in Vic.
             if (not In_Check)
               and then Moves (I).Flag /= Promotion
               and then (Static_Exchange_Value (Position, Moves (I)) < 0
-                        or else Stand
-                          + Kind_Value (Captured_Kind (Position, Moves (I)))
-                          + Delta_Margin <= A)
+                        or else Stand + Vic (I) + Delta_Margin <= A)
             then
                null;
             else
@@ -878,10 +898,13 @@ package body BBChess.Search is
 
       -- Move ordering, then PVS over the children.
       declare
-         Ord : array (1 .. 256) of Score_Type;
+         Ord : Order_Array;
+         Tac : Flag_Array;
       begin
          for J in 1 .. Count loop
-            Ord (J) := Order (Ctx, Position, Moves (J), Hash_Move, Ply);
+            Tac (J) := Is_Tactical (Position, Moves (J));
+            Ord (J) := Order (Ctx, Position, Moves (J), Hash_Move, Ply,
+                              Tac (J));
          end loop;
 
          for I in 1 .. Count loop
@@ -898,9 +921,12 @@ package body BBChess.Search is
                if Best_J /= I then
                   declare
                      Tmp_M : constant Move_Type := Moves (I);
+                     Tmp_T : constant Boolean := Tac (I);
                   begin
                      Moves (I) := Moves (Best_J);
                      Moves (Best_J) := Tmp_M;
+                     Tac (I) := Tac (Best_J);
+                     Tac (Best_J) := Tmp_T;
                   end;
                   Ord (Best_J) := Ord (I);
                   Ord (I) := Best_O;
@@ -910,7 +936,7 @@ package body BBChess.Search is
             declare
                Undo    : Undo_Info;
                Score   : Score_Type;
-               Tactical : constant Boolean := Is_Tactical (Position, Moves (I));
+               Tactical : constant Boolean := Tac (I);
                Reduction : Natural := 0;
                Move_Depth : Natural := Child_Depth;
             begin
@@ -1045,10 +1071,11 @@ package body BBChess.Search is
       end if;
 
       declare
-         Ord : array (1 .. 256) of Score_Type;
+         Ord : Order_Array;
       begin
          for J in 1 .. Count loop
-            Ord (J) := Order (Ctx, Position, Root_Moves (J), Prev_Best, 0);
+            Ord (J) := Order (Ctx, Position, Root_Moves (J), Prev_Best, 0,
+                              Is_Tactical (Position, Root_Moves (J)));
          end loop;
 
          for I in 1 .. Count loop

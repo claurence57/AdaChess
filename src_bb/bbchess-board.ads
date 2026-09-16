@@ -44,11 +44,17 @@ package BBChess.Board is
    -- Put_Piece / Remove_Piece (every mutation goes through them).
    type Piece_Board_Array is array (Piece_Type) of Bitboard;
    type Color_Board_Array is array (Color_Type) of Bitboard;
+
+   -- Square -> piece map, maintained incrementally by Put_Piece /
+   -- Remove_Piece, so Piece_At is an O(1) lookup instead of a bitboard scan.
+   -- The entry of an empty square is unspecified (use All_Occ to test).
+   type Square_Piece_Array is array (Square_Type) of Piece_Type;
    type Position_Type is
       record
          Pieces      : Piece_Board_Array := (others => 0);
          All_Occ     : Bitboard := 0;
          Color_Occ   : Color_Board_Array := (others => 0);
+         Squares     : Square_Piece_Array := (others => White_Pawn);
          Side        : Color_Type := White;
          Castle      : Castle_Rights_Type := (others => (others => False));
          En_Passant  : Integer := Ep_None;
@@ -95,5 +101,19 @@ package BBChess.Board is
 
    procedure Clear_Lowest_Bit (Board : in out Bitboard);
    -- Clear the least significant set bit.
+
+   --  Hot cross-unit primitives: inlined into the search / move generation /
+   --  evaluation callers under the release build's -gnatN (semantics
+   --  unchanged, the call overhead disappears).
+   pragma Inline (Piece_Board);
+   pragma Inline (Piece_At);
+   pragma Inline (Color_Board);
+   pragma Inline (Occupancy);
+   pragma Inline (Is_Empty);
+   pragma Inline (Lowest_Bit);
+   pragma Inline (Popcount);
+   pragma Inline (Clear_Lowest_Bit);
+   pragma Inline (Put_Piece);
+   pragma Inline (Remove_Piece);
 
 end BBChess.Board;

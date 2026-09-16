@@ -4,13 +4,14 @@
 
 package body BBChess.Board is
 
-   -- Bit intrinsics provided by bbchess-bits.c (GCC __builtin_popcountll /
-   -- __builtin_ctzll, built with -mpopcnt -mbmi). These replace the previous
-   -- software loops, which dominated the profile.
-   function C_Popcount (X : in Bitboard) return Natural
-     with Import, Convention => C, External_Name => "bb_popcountll";
-   function C_Ctz (X : in Bitboard) return Natural
-     with Import, Convention => C, External_Name => "bb_ctzll";
+   --  GCC builtins imported as compiler intrinsics so they are emitted inline
+   --  (POPCNT / BSF) instead of as an out-of-line call into the C shim. Under
+   --  the portable build GCC lowers them to the libgcc routines, exactly as
+   --  the C shim does, so behaviour is unchanged in both modes.
+   function Intrin_Popcount (X : in Bitboard) return Natural
+     with Import, Convention => Intrinsic, External_Name => "__builtin_popcountll";
+   function Intrin_Ctz (X : in Bitboard) return Natural
+     with Import, Convention => Intrinsic, External_Name => "__builtin_ctzll";
 
    ---------------
    -- Color_Board --
@@ -54,6 +55,7 @@ package body BBChess.Board is
       Position.All_Occ := Position.All_Occ or M;
       Position.Color_Occ (Pieces.Color (Piece)) :=
         Position.Color_Occ (Pieces.Color (Piece)) or M;
+      Position.Squares (Square) := Piece;
    end Put_Piece;
 
    -----------------
@@ -82,14 +84,12 @@ package body BBChess.Board is
    is
       Mask : constant Bitboard := Bit (Square);
    begin
-      for Candidate in Piece_Type loop
-         if (Position.Pieces (Candidate) and Mask) /= 0 then
-            Piece := Candidate;
-            return True;
-         end if;
-      end loop;
-      Piece := White_Pawn;
-      return False;
+      if (Position.All_Occ and Mask) = 0 then
+         Piece := White_Pawn;
+         return False;
+      end if;
+      Piece := Position.Squares (Square);
+      return True;
    end Piece_At;
 
    ---------------
@@ -98,7 +98,7 @@ package body BBChess.Board is
 
    function Lowest_Bit (Board : in Bitboard) return Square_Type is
    begin
-      return Square_Type (C_Ctz (Board));
+      return Square_Type (Intrin_Ctz (Board));
    end Lowest_Bit;
 
    -------------
@@ -107,7 +107,7 @@ package body BBChess.Board is
 
    function Popcount (Board : in Bitboard) return Natural is
    begin
-      return C_Popcount (Board);
+      return Intrin_Popcount (Board);
    end Popcount;
 
    ----------------------

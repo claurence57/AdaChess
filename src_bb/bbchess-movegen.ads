@@ -25,6 +25,12 @@ use BBChess.Moves;
 package BBChess.Movegen is
 
    type Move_List is array (1 .. 256) of Move_Type;
+   --  Move_List is only ever a scratch buffer: the generator fills Moves
+   --  (1 .. Count) and every caller reads exactly that prefix, so the
+   --  per-object default initialization (a 256-record zero fill on each
+   --  declaration) is pure overhead on the hot search path. Suppressing it
+   --  is safe because no element is read before it is written.
+   pragma Suppress_Initialization (Move_List);
 
    procedure Generate_Legal_Moves
      (Position : in Position_Type;
@@ -61,5 +67,10 @@ package BBChess.Movegen is
    -- Bitboard of the pieces of Color that are absolutely pinned: they stand
    -- between their own king and an enemy slider of matching direction, so
    -- they cannot legally move off the pin line.
+
+   --  Hot helpers: inline the wrappers into the move generator and search.
+   pragma Inline (King_In_Check);
+   pragma Inline (Is_Attacked);
+   pragma Inline (Pin_Mask);
 
 end BBChess.Movegen;

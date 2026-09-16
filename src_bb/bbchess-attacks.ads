@@ -63,4 +63,10 @@ private
    Rook_Mask   : array (Square_Type) of Bitboard := (others => 0);
    Bishop_Mask : array (Square_Type) of Bitboard := (others => 0);
 
+   -- Inlined into the hot callers (movegen / eval / Is_Attacked); the PEXT
+   -- import itself is unchanged.
+   pragma Inline (Bishop_Attacks);
+   pragma Inline (Rook_Attacks);
+   pragma Inline (Queen_Attacks);
+
 end BBChess.Attacks;
