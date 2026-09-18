@@ -2,11 +2,13 @@
 
 ## Non publié (développement post bb-1.0)
 
-> Les entrées **Phase 0/1**, **Phase 2**, **Phase 4a (threats)** et **livre
-> Polyglot** ci-dessous ont été développées avec l'agent IA **Sisyphus**
-> (OhMyOpenCode) sous **OpenCode**, modèle `deepseek/deepseek-v4-flash`
-> (voir `DEVELOPMENT.md` §11). Les entrées plus anciennes (Performance, M1/M2,
-> UCI, etc.) sont antérieures.
+> **Développement assisté par IA.** Toutes les entrées ci-dessous (postérieures
+> au fork initial) ont été développées **avec l'aide d'agents IA** ; **aucun
+> développement n'a été fait manuellement**. Modèle principal : **DeepSeek V4.1
+> Flash** ; corrections et compléments apportés par des **prompts générés avec
+> Claude** et **Kimi K3**. Outils de travail de base : **opencode** (agent
+> *Sisyphus* / OhMyOpenCode) et des **interfaces web**. Voir `DEVELOPMENT.md`
+> (note en tête et §11).
 
 ### Recherche — Phase 0/1 (correctness + élagage)
 

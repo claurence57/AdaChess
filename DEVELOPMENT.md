@@ -4,6 +4,15 @@ Ce document résume le parcours du projet : les améliorations apportées au mot
 **AdaChess** (mailbox, dit **MB**), la création du moteur **AdaChess-BB** (bitboard,
 dit **BB**), les différences entre les deux, et l'état des améliorations jusqu'ici.
 
+> **Développement assisté par IA.** Toutes les modifications apportées au projet
+> depuis le fork initial — moteur **MB** (`src/`), moteur **BB** (`src_bb/`),
+> scripts, tests et documentation incluse — ont été réalisées **avec l'aide
+> d'agents IA** ; **aucun développement n'a été fait manuellement**. Modèle
+> principal : **DeepSeek V4.1 Flash** ; des corrections et compléments ont été
+> apportés par des **prompts générés avec Claude** et **Kimi K3**. Outils de
+> travail de base : **opencode** (agent *Sisyphus* / OhMyOpenCode) et des
+> **interfaces web**.
+
 ---
 
 ## 1. AdaChess (MB) — les améliorations apportées
