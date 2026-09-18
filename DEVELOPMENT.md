@@ -1049,6 +1049,26 @@ HEAD. Piste de correction : augmenter fortement `a_k` (ou co-échelonner les
 paramètres, ou augmenter le nombre de parties) et **valider par un run pilote
 court** que `theta` bouge avant tout run complet.
 
+### 20.2 Run corrigé (17-18/09) : θ bouge, revalidation non concluante
+
+Après le correctif (`theta` flottant + `--a` configurable), deux **pilotes
+courts** (8 itér. × 40 part., 0.2+0.02) confirment que `theta` bouge :
+`max_move` 5,3 → 12 avec `a=200` (mais la borne haute est atteinte en ~4 itér.,
+donc `a=200` est trop grand) et 1,18 → 2,67 avec `a=50`. Deux runs complets de
+**50 × 200 parties** à `1+0.1`, `a=50`, sont lancés **en parallèle** sur des
+copies gelées de `bin_bb` (graines 1 et 2).
+
+**Run 1 (graine 1) — terminé.** **22 des 35** paramètres ont bougé (pas de ±1 à
+±4 ; ex. `P_ROOKCONN_EG` 14→18, `P_MOBILITY_R` 2→4, `P_ROOKCONN_OP` 10→7).
+**Revalidation SPRT 300 vs HEAD** : params SPSA 92-85-123 (51,2 %),
+**+8,1 ± 30,2 Elo, LOS 70,1 %, LLR +0,12 → INCONCLUSIF au plafond.** Le tuning
+ne démontre donc **aucun gain significatif** → **non adopté**. Cohérent avec la
+leçon des § 7sexies/§21 : le tuning automatique d'éval reste déconnecté de la
+force.
+
+**Run 2 (graine 2)** : en cours (≈ itér. 37/50) ; sa revalidation SPRT 300 sera
+enchaînée automatiquement (`post_all`).
+
 ---
 
 ## 21. Tuning d'éval à grande échelle — dataset Lichess CC0
@@ -1194,3 +1214,20 @@ perft 1→5 inchangé) :
 (**×1,59**, 1 552 → 2 467 knps) ; `--bench 11` 1,704 → 1,067 s (×1,60) ;
 instructions retirées **−28 %**. Candidats **rejetés** après mesure : cache
 d'attaques par case, inlining de SEE.
+
+---
+
+## 26. Match vs GNU Chess — instabilité de GNU 6.2.7
+
+Match **2 min + 1 s, 30 parties**, **sans livre des deux côtés** (BB : livre
+masqué par le SPSA ; GNU : `OwnBook = false` dans `gnuchess.ini`).
+**Résultat : BB 3-20-7 = 21,7 %, ≈ −223 ± 134 Elo (LOS 0 %)** — cohérent avec
+la baseline documentée (gauntlet Phase 1 : ≈ −241 Elo). L'échantillon de
+6 parties qui donnait −417 était donc du bruit amplifié par la petite taille.
+
+**Point important** : `GNU Chess 6.2.7` **segfault de façon chronique**
+(journal noyau : `gnuchess[…]: segfault at 2d0 … in libc.so.6`), ce qui peut
+faire **avorter un match** (`Termination "abandoned"`, « disconnects ») — un
+premier essai de 30 parties s'est arrêté à la 2ᵉ. **BB n'a jamais planté**
+(aucun `adachess` dans le journal noyau) : l'instabilité est purement côté GNU,
+et la gestion du temps de BB est saine (0 forfait au temps).

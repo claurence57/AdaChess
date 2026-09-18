@@ -188,6 +188,15 @@
 - **SPRT 300 parties vs HEAD : NEW 49,8 %, ≈ −1 ± 31 Elo, LOS 47 %** → **neutre,
   non retenu**. Voir `DEVELOPMENT.md` §24.
 
+### Matchs — vs GNU Chess : instabilité de GNU 6.2.7
+
+- Match 2+1, 30 parties, **sans livre des deux côtés** (BB : livre masqué par le
+  SPSA ; GNU : `OwnBook = false`) : **BB 3-20-7 = 21,7 %, ≈ −223 ± 134 Elo**,
+  0 forfait au temps.
+- `GNU Chess 6.2.7` **segfault de façon chronique** (`segfault … in libc.so.6`,
+  offset `0x2d0`) et peut faire avorter un match ; **BB n'a jamais planté**.
+  Voir `DEVELOPMENT.md` §26.
+
 ### Performance — optimisations guidées par perf (×1,59, arbre identique)
 
 - `pragma Inline` des primitives chaudes, `Piece_At` **O(1)** incrémental,
@@ -218,6 +227,11 @@
   `theta` n'avait pas bougé d'une unité (`a_k` ~30-100× trop petit face à
   l'arrondi entier) ; aucun gain possible, revalidation non lancée. Voir
   `DEVELOPMENT.md` §20.1.
+- **Run corrigé (17-18/09)** : `theta` en flottants + `--a` (les pilotes
+  confirment que θ bouge). Run 1 (graine 1, 50×200) : **22/35 paramètres
+  déplacés**, revalidation SPRT 300 = **+8,1 ± 30,2 Elo, LOS 70,1 % →
+  INCONCLUSIF**, **non adopté**. Run 2 (graine 2) en cours. Voir `DEVELOPMENT.md`
+  §20.2.
 
 ### Outillage — tuning d'éval à grande échelle (dataset Lichess)
 
