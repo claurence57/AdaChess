@@ -65,6 +65,38 @@ package body BBChess.Eval is
        7 => Bit (7)  or Bit (15) or Bit (23) or Bit (31)
              or Bit (39) or Bit (47) or Bit (55) or Bit (63));
 
+   -- Neighbour files of each file (file-1 | file+1), precomputed so the
+   -- isolated-pawn test needs no per-file branch.
+   Neighbor_Files : constant File_Mask_Table :=
+     (0 => Bit (1)  or Bit (9)  or Bit (17) or Bit (25)
+             or Bit (33) or Bit (41) or Bit (49) or Bit (57),
+      1 => Bit (0)  or Bit (8)  or Bit (16) or Bit (24)
+             or Bit (32) or Bit (40) or Bit (48) or Bit (56)
+          or Bit (2)  or Bit (10) or Bit (18) or Bit (26)
+             or Bit (34) or Bit (42) or Bit (50) or Bit (58),
+      2 => Bit (1)  or Bit (9)  or Bit (17) or Bit (25)
+             or Bit (33) or Bit (41) or Bit (49) or Bit (57)
+          or Bit (3)  or Bit (11) or Bit (19) or Bit (27)
+             or Bit (35) or Bit (43) or Bit (51) or Bit (59),
+      3 => Bit (2)  or Bit (10) or Bit (18) or Bit (26)
+             or Bit (34) or Bit (42) or Bit (50) or Bit (58)
+          or Bit (4)  or Bit (12) or Bit (20) or Bit (28)
+             or Bit (36) or Bit (44) or Bit (52) or Bit (60),
+      4 => Bit (3)  or Bit (11) or Bit (19) or Bit (27)
+             or Bit (35) or Bit (43) or Bit (51) or Bit (59)
+          or Bit (5)  or Bit (13) or Bit (21) or Bit (29)
+             or Bit (37) or Bit (45) or Bit (53) or Bit (61),
+      5 => Bit (4)  or Bit (12) or Bit (20) or Bit (28)
+             or Bit (36) or Bit (44) or Bit (52) or Bit (60)
+          or Bit (6)  or Bit (14) or Bit (22) or Bit (30)
+             or Bit (38) or Bit (46) or Bit (54) or Bit (62),
+      6 => Bit (5)  or Bit (13) or Bit (21) or Bit (29)
+             or Bit (37) or Bit (45) or Bit (53) or Bit (61)
+          or Bit (7)  or Bit (15) or Bit (23) or Bit (31)
+             or Bit (39) or Bit (47) or Bit (55) or Bit (63),
+       7 => Bit (6)  or Bit (14) or Bit (22) or Bit (30)
+              or Bit (38) or Bit (46) or Bit (54) or Bit (62));
+
    -- One-bit-per-square mask of every rank (0 = rank 1 / a1..h1).
    type Rank_Mask_Table is array (Natural range 0 .. 7) of Bitboard;
    Rank_Mask : constant Rank_Mask_Table :=
@@ -107,14 +139,17 @@ package body BBChess.Eval is
       Wide : Bitboard := Enemy or East_1 (Enemy) or West_1 (Enemy);
       Res  : Bitboard := 0;
    begin
-      for Step in 1 .. 7 loop
-         if Color = White then
+      if Color = White then
+         for Step in 1 .. 7 loop
             Wide := South_1 (Wide);
-         else
+            Res := Res or Wide;
+         end loop;
+      else
+         for Step in 1 .. 7 loop
             Wide := North_1 (Wide);
-         end if;
-         Res := Res or Wide;
-      end loop;
+            Res := Res or Wide;
+         end loop;
+      end if;
       return Res;
    end Front_Blockers;
 
@@ -475,14 +510,19 @@ package body BBChess.Eval is
    -- Game phase from the remaining material (0 = pure endgame,
    -- 100 = full opening). Mirrors the classic phase count.
    function Game_Phase (Position : in Position_Type) return Natural is
-      P : Natural := 0;
+      P : Natural;
    begin
-      for Color in Color_Type loop
-         P := P + 4 * Popcount (Position.Pieces (Make (Color, Knight)));
-         P := P + 4 * Popcount (Position.Pieces (Make (Color, Bishop)));
-         P := P + 9 * Popcount (Position.Pieces (Make (Color, Rook)));
-         P := P + 16 * Popcount (Position.Pieces (Make (Color, Queen)));
-      end loop;
+      -- Both colors share each kind so a single popcount per kind is enough
+      -- (the white and black bitboards are disjoint): one popcount instead of
+      -- two added.
+      P := 4 * Popcount (Position.Pieces (White_Knight)
+                         or Position.Pieces (Black_Knight));
+      P := P + 4 * Popcount (Position.Pieces (White_Bishop)
+                             or Position.Pieces (Black_Bishop));
+      P := P + 9 * Popcount (Position.Pieces (White_Rook)
+                             or Position.Pieces (Black_Rook));
+      P := P + 16 * Popcount (Position.Pieces (White_Queen)
+                              or Position.Pieces (Black_Queen));
       if P > 100 then
          P := 100;
       end if;
@@ -641,15 +681,15 @@ package body BBChess.Eval is
                end if;
             end loop;
 
-            -- Advanced enemy pawns storming the wing.
+            -- Advanced enemy pawns storming the wing. Every square of Wing
+            -- lies in the king's file range, so only the rank test remains.
             B := Position.Pieces (Make (Enemy, Pawn)) and Wing;
             while B /= 0 loop
                declare
                   S : constant Square_Type := Lowest_Bit (B);
-                  F : constant Natural := File_Of (S);
                   R : constant Natural := Own_Row (Color, S);
                begin
-                  if F in Lo .. Hi and then R in 3 .. 5 then
+                  if R in 3 .. 5 then
                      Result := Result - Pawn_Storm;
                   end if;
                end;
@@ -712,28 +752,19 @@ package body BBChess.Eval is
            (Opening => Bishop_Pair_Opening, End_Game => Bishop_Pair_Endgame);
       end if;
 
-      -- Mobility (and the special rook-on-7th bonus).
-      for Kind in Knight .. Queen loop
-         declare
-            Weight : constant Score_Type :=
-              (case Kind is
-                  when Knight => Mobility_N,
-                  when Bishop => Mobility_B,
-                  when Rook   => Mobility_R,
-                  when Queen  => Mobility_Q,
-                  when others => 0);
-            Attack_Weight : constant Score_Type :=
-              (case Kind is
-                  when Knight => King_Attack_Knight,
-                  when Bishop => King_Attack_Bishop,
-                  when Rook   => King_Attack_Rook,
-                  when Queen  => King_Attack_Queen,
-                  when others => 0);
+      -- Mobility (and the special rook-on-7th bonus). Split into one inlined
+      -- body per kind so that Piece_Attacks and the (loop-invariant) weights
+      -- see a literal Kind and constant-fold; the emitted move scores and the
+      -- accumulation order are unchanged.
+      declare
+         procedure Mobility_Of (Kind          : in Kind_Type;
+                                Weight        : in Score_Type;
+                                Attack_Weight : in Score_Type) is
+            Pieces_Here : Bitboard := Position.Pieces (Make (Color, Kind));
          begin
-            B := Position.Pieces (Make (Color, Kind));
-            while B /= 0 loop
+            while Pieces_Here /= 0 loop
                declare
-                  Sq  : constant Square_Type := Lowest_Bit (B);
+                  Sq  : constant Square_Type := Lowest_Bit (Pieces_Here);
                   A   : constant Bitboard := Piece_Attacks (Kind, Sq, Occ);
                begin
                   Result := Result +
@@ -800,10 +831,16 @@ package body BBChess.Eval is
                       end if;
                    end if;
                end;
-               B := B and (B - 1);
+               Pieces_Here := Pieces_Here and (Pieces_Here - 1);
             end loop;
-         end;
-      end loop;
+         end Mobility_Of;
+         pragma Inline (Mobility_Of);
+      begin
+         Mobility_Of (Knight, Mobility_N, King_Attack_Knight);
+         Mobility_Of (Bishop, Mobility_B, King_Attack_Bishop);
+         Mobility_Of (Rook,   Mobility_R, King_Attack_Rook);
+         Mobility_Of (Queen,  Mobility_Q, King_Attack_Queen);
+      end;
 
       -- Connected rooks: when a rook is defended by a friendly rook (same
       -- file or rank with a clear line), both gain a small bonus.
@@ -846,23 +883,13 @@ package body BBChess.Eval is
                end if;
 
                if Cnt >= 1 then
-                  declare
-                     Adj : Bitboard := 0;
-                  begin
-                     if F > 0 then
-                        Adj := Adj or File_Mask (F - 1);
-                     end if;
-                     if F < 7 then
-                        Adj := Adj or File_Mask (F + 1);
-                     end if;
-                     if (Own_Pawns and Adj) = 0 then
-                        Result := Result +
-                          (Opening => (-Isolated_Pawn_Opening)
-                             * Score_Type (Cnt),
-                           End_Game => (-Isolated_Pawn_Endgame)
-                             * Score_Type (Cnt));
-                     end if;
-                  end;
+                  if (Own_Pawns and Neighbor_Files (F)) = 0 then
+                     Result := Result +
+                       (Opening => (-Isolated_Pawn_Opening)
+                          * Score_Type (Cnt),
+                        End_Game => (-Isolated_Pawn_Endgame)
+                          * Score_Type (Cnt));
+                  end if;
                end if;
             end;
          end loop;
@@ -873,10 +900,10 @@ package body BBChess.Eval is
             declare
                Sq      : constant Square_Type := Lowest_Bit (PB);
                F       : constant Natural := File_Of (Sq);
-               Row     : constant Natural := Own_Row (Color, Sq);
-               Defended_Pawn : constant Boolean :=
-                 Defended_By_Pawn (Position, Color, Sq);
-               Outside_Pawn  : constant Boolean :=
+                Row     : constant Natural := Own_Row (Color, Sq);
+                Defended_Pawn : constant Boolean :=
+                  Defended_By_Pawn (Position, Color, Sq);
+                Outside_Pawn  : constant Boolean :=
                  abs (Integer (F) - Integer (File_Of (Enemy_King)))
                  >= Outside_Passed_Distance;
             begin

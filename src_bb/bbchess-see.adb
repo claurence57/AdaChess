@@ -2,11 +2,19 @@
 --  AdaChess-BB : static exchange evaluation (body)
 --
 --  The sequence is explored with a small recursive minimax over a working
---  copy of the position: each step removes the chosen attacker from its
+--  copy of the board: each step removes the chosen attacker from its
 --  square, removes the piece standing on the target square and settles the
 --  attacker on it, then lets the opponent answer. The occupancy is therefore
 --  always up to date, which makes x-ray (sliding) attackers appear as soon
 --  as the piece in front of them is gone.
+--
+--  The working copy only needs the twelve piece bitboards, the total
+--  occupancy and the two colour occupancies: the exchange never looks at the
+--  square->piece map, and it always knows which piece stands on the target
+--  square (it is the attacker it just settled there). Keeping a dedicated
+--  compact record avoids copying the whole Position (clocks, castling rights,
+--  key, material, 64-entry square map) on every call.
+--
 
 with BBChess.Attacks;
 use BBChess.Attacks;
@@ -15,6 +23,36 @@ with BBChess.Movegen;
 use BBChess.Movegen;
 
 package body BBChess.See is
+
+   --  Bitboard-only snapshot of a board, mutated by the exchange.
+   type See_Board is
+      record
+         Pieces    : Piece_Board_Array := (others => 0);
+         All_Occ   : Bitboard := 0;
+         Color_Occ : Color_Board_Array := (others => 0);
+      end record;
+
+   procedure See_Put (B : in out See_Board; Piece : in Piece_Type;
+                      Square : in Square_Type) is
+      M : constant Bitboard := Bit (Square);
+   begin
+      B.Pieces (Piece) := B.Pieces (Piece) or M;
+      B.All_Occ := B.All_Occ or M;
+      B.Color_Occ (Pieces.Color (Piece)) :=
+        B.Color_Occ (Pieces.Color (Piece)) or M;
+   end See_Put;
+   pragma Inline (See_Put);
+
+   procedure See_Remove (B : in out See_Board; Piece : in Piece_Type;
+                         Square : in Square_Type) is
+      M : constant Bitboard := not Bit (Square);
+   begin
+      B.Pieces (Piece) := B.Pieces (Piece) and M;
+      B.All_Occ := B.All_Occ and M;
+      B.Color_Occ (Pieces.Color (Piece)) :=
+        B.Color_Occ (Pieces.Color (Piece)) and M;
+   end See_Remove;
+   pragma Inline (See_Remove);
 
    -----------------
    -- Kind_Value --
@@ -36,40 +74,44 @@ package body BBChess.See is
    end Kind_Value;
 
    -----------------
-   -- Attackers_Of --
+   -- Pin_Mask_See --
    -----------------
 
-   -- Every piece of Side that attacks To on the current board, including
-   -- x-ray sliders (the board occupancy already reflects the captures made
-   -- so far). Pinned pieces are filtered out by the caller.
-   function Attackers_Of (Work : in Position_Type;
-                          To   : in Square_Type;
-                          Side : in Color_Type) return Bitboard
+   -- Pin_Mask on the compact board (same computation as Movegen.Pin_Mask,
+   -- only the fields used by the bitboard-only working copy).
+   function Pin_Mask_See (B : in See_Board; Color : in Color_Type)
+     return Bitboard
    is
-      Occ : constant Bitboard := Occupancy (Work);
-      Result : Bitboard := 0;
+      Enemy   : constant Color_Type := Opposite (Color);
+      King_Sq : constant Square_Type :=
+        Lowest_Bit (B.Pieces (Make (Color, King)));
+      Occ     : constant Bitboard := B.All_Occ;
+      Own     : constant Bitboard := B.Color_Occ (Color);
+      Rook_Q  : constant Bitboard :=
+        B.Pieces (Make (Enemy, Rook)) or B.Pieces (Make (Enemy, Queen));
+      Bish_Q  : constant Bitboard :=
+        B.Pieces (Make (Enemy, Bishop)) or B.Pieces (Make (Enemy, Queen));
+      Pinners : Bitboard :=
+        (Rook_Ray (King_Sq) and Rook_Q) or (Bishop_Ray (King_Sq) and Bish_Q);
+      Result  : Bitboard := 0;
    begin
-      -- A Side pawn attacking To sits on a square that a pawn of the
-      -- opposite color standing on To would attack.
-      Result := Result or
-        (Pawn_Attacks (Opposite (Side), To) and Work.Pieces (Make (Side, Pawn)));
-
-      Result := Result or
-        (Knight_Attacks (To) and Work.Pieces (Make (Side, Knight)));
-
-      Result := Result or
-        (Bishop_Attacks (To, Occ) and
-           (Work.Pieces (Make (Side, Bishop)) or Work.Pieces (Make (Side, Queen))));
-
-      Result := Result or
-        (Rook_Attacks (To, Occ) and
-           (Work.Pieces (Make (Side, Rook)) or Work.Pieces (Make (Side, Queen))));
-
-      Result := Result or
-        (King_Attacks (To) and Work.Pieces (Make (Side, King)));
-
+      while Pinners /= 0 loop
+         declare
+            P        : constant Square_Type := Lowest_Bit (Pinners);
+            Blockers : Bitboard;
+         begin
+            Blockers := Between (King_Sq, P) and Occ;
+            if Blockers /= 0
+              and then (Blockers and (Blockers - 1)) = 0
+              and then (Blockers and Own) /= 0
+            then
+               Result := Result or Blockers;
+            end if;
+         end;
+         Pinners := Pinners and (Pinners - 1);
+      end loop;
       return Result;
-   end Attackers_Of;
+   end Pin_Mask_See;
 
    -------------
    -- Weakest --
@@ -77,49 +119,49 @@ package body BBChess.See is
 
    -- Least valuable attacker of Side on To that is not absolutely pinned.
    -- The king is only returned when no other piece can take part.
-   procedure Weakest (Work   : in Position_Type;
+   procedure Weakest (B      : in See_Board;
                       To     : in Square_Type;
                       Side   : in Color_Type;
                       Found  : out Boolean;
                       From   : out Square_Type;
                       Piece  : out Piece_Type)
    is
-      Occ     : constant Bitboard := Occupancy (Work);
-      Pinned  : constant Bitboard := Pin_Mask (Work, Side);
+      Occ     : constant Bitboard := B.All_Occ;
+      Pinned  : constant Bitboard := Pin_Mask_See (B, Side);
       Cand    : Bitboard;
    begin
       Found := False;
-      From   := 0;
-      Piece  := Make (Side, Pawn);
+      From  := 0;
+      Piece := Make (Side, Pawn);
 
       Cand := (Pawn_Attacks (Opposite (Side), To)
-                 and Work.Pieces (Make (Side, Pawn))) and not Pinned;
+                 and B.Pieces (Make (Side, Pawn))) and not Pinned;
       if Cand /= 0 then
          Found := True; From := Lowest_Bit (Cand); Piece := Make (Side, Pawn); return;
       end if;
 
-      Cand := (Knight_Attacks (To) and Work.Pieces (Make (Side, Knight))) and not Pinned;
+      Cand := (Knight_Attacks (To) and B.Pieces (Make (Side, Knight))) and not Pinned;
       if Cand /= 0 then
          Found := True; From := Lowest_Bit (Cand); Piece := Make (Side, Knight); return;
       end if;
 
-      Cand := (Bishop_Attacks (To, Occ) and Work.Pieces (Make (Side, Bishop))) and not Pinned;
+      Cand := (Bishop_Attacks (To, Occ) and B.Pieces (Make (Side, Bishop))) and not Pinned;
       if Cand /= 0 then
          Found := True; From := Lowest_Bit (Cand); Piece := Make (Side, Bishop); return;
       end if;
 
-      Cand := (Rook_Attacks (To, Occ) and Work.Pieces (Make (Side, Rook))) and not Pinned;
+      Cand := (Rook_Attacks (To, Occ) and B.Pieces (Make (Side, Rook))) and not Pinned;
       if Cand /= 0 then
          Found := True; From := Lowest_Bit (Cand); Piece := Make (Side, Rook); return;
       end if;
 
       Cand := ((Bishop_Attacks (To, Occ) or Rook_Attacks (To, Occ))
-                 and Work.Pieces (Make (Side, Queen))) and not Pinned;
+                 and B.Pieces (Make (Side, Queen))) and not Pinned;
       if Cand /= 0 then
          Found := True; From := Lowest_Bit (Cand); Piece := Make (Side, Queen); return;
       end if;
 
-      Cand := King_Attacks (To) and Work.Pieces (Make (Side, King));
+      Cand := King_Attacks (To) and B.Pieces (Make (Side, King));
       if Cand /= 0 then
          Found := True; From := Lowest_Bit (Cand); Piece := Make (Side, King);
       end if;
@@ -130,35 +172,28 @@ package body BBChess.See is
    ----------------
 
    -- Best outcome (>= 0, a side may always decline) for Side of the capture
-   -- sequence on To, knowing a piece of the opponent currently stands there.
-   -- Work is consumed along the way: every capture removes a piece.
-   function Exchange (Work : in out Position_Type;
-                      To   : in Square_Type;
-                      Side : in Color_Type) return Score_Type
+   -- sequence on To, knowing On_Piece (a piece of the opponent) currently
+   -- stands there. B is consumed along the way: every capture removes a piece.
+   function Exchange (B        : in out See_Board;
+                      To       : in Square_Type;
+                      Side     : in Color_Type;
+                      On_Piece : in Piece_Type) return Score_Type
    is
-      On_Piece : Piece_Type;
-      Present  : Boolean;
-      Found    : Boolean;
-      From     : Square_Type;
-      Att      : Piece_Type;
-      Value    : Score_Type;
+      Found  : Boolean;
+      From   : Square_Type;
+      Att    : Piece_Type;
+      Value  : Score_Type;
    begin
-      Present := Piece_At (Work, To, On_Piece);
-      if not Present then
-         -- Nothing to gain by capturing an empty square.
-         return 0;
-      end if;
-
-      Weakest (Work, To, Side, Found, From, Att);
+      Weakest (B, To, Side, Found, From, Att);
       if not Found then
          -- No attacker available: the opponent simply stands pat.
          return 0;
       end if;
 
       -- Make the recapture.
-      Remove_Piece (Work, Att, From);
-      Remove_Piece (Work, On_Piece, To);
-      Put_Piece (Work, Att, To);
+      See_Remove (B, Att, From);
+      See_Remove (B, On_Piece, To);
+      See_Put (B, Att, To);
 
       if Kind (Att) = King then
          -- A king capture ends the sequence: the king itself cannot be
@@ -166,7 +201,8 @@ package body BBChess.See is
          return Kind_Value (Kind (On_Piece));
       end if;
 
-      Value := Kind_Value (Kind (On_Piece)) - Exchange (Work, To, Opposite (Side));
+      Value := Kind_Value (Kind (On_Piece))
+                 - Exchange (B, To, Opposite (Side), Att);
       if Value < 0 then
          -- Recapturing here would lose material: decline instead.
          return 0;
@@ -184,7 +220,6 @@ package body BBChess.See is
    is
       Side        : constant Color_Type := Position.Side;
       Opp         : constant Color_Type := Opposite (Side);
-      Work        : Position_Type := Position;
       Victim      : Score_Type := 0;
       Captured    : Piece_Type;
       Present     : Boolean;
@@ -204,7 +239,6 @@ package body BBChess.See is
             return 0;
          end if;
          Victim := Kind_Value (Kind (Captured));
-         Remove_Piece (Work, Captured, Move.To);
       else
          Victim := Kind_Value (Pawn);
          -- The captured pawn stands just behind the (empty) target square.
@@ -213,14 +247,28 @@ package body BBChess.See is
          else
             Victim_Square := Move.To + 8;
          end if;
-         Remove_Piece (Work, Make (Opp, Pawn), Victim_Square);
+         Captured := Make (Opp, Pawn);
       end if;
 
-      -- The mover leaves its square and settles on the target square.
-      Remove_Piece (Work, Move.Piece, Move.From);
-      Put_Piece (Work, Move.Piece, Move.To);
+      -- Build the compact working board from the position, then play the
+      -- capture: remove the victim, move the attacker onto the target.
+      declare
+         B : See_Board;
+      begin
+         B.Pieces    := Position.Pieces;
+         B.All_Occ   := Position.All_Occ;
+         B.Color_Occ := Position.Color_Occ;
 
-      return Victim - Exchange (Work, Move.To, Opp);
+         if Move.Flag = En_Passant then
+            See_Remove (B, Captured, Victim_Square);
+         else
+            See_Remove (B, Captured, Move.To);
+         end if;
+         See_Remove (B, Move.Piece, Move.From);
+         See_Put (B, Move.Piece, Move.To);
+
+         return Victim - Exchange (B, Move.To, Opp, Move.Piece);
+      end;
    end Static_Exchange_Value;
 
 end BBChess.See;

@@ -875,21 +875,28 @@ package body BBChess.Search is
         and then Has_Non_Pawn (Position, Position.Side)
       then
          declare
-            Saved   : Position_Type := Position;
-            N_Score : Score_Type;
+            -- Only Side, En_Passant and Key are touched here (the recursive
+            -- call restores the board through Unmake), so saving just those
+            -- three fields avoids copying the whole Position.
+            Saved_Side : constant Color_Type := Position.Side;
+            Saved_Ep   : constant Integer := Position.En_Passant;
+            Saved_Key  : constant Bitboard := Position.Key;
+            N_Score    : Score_Type;
          begin
-            Position.Side := Opposite (Position.Side);
             if Position.En_Passant /= Ep_None then
                Position.Key :=
                  Position.Key xor Hash.Ep_Key (Position.En_Passant mod 8);
             end if;
             Position.En_Passant := Ep_None;
+            Position.Side := Opposite (Position.Side);
             Position.Key := Position.Key xor Hash.Side_Key;
 
             N_Score := -Negamax (Ctx, Position, Depth - 1 - Null_Reduction,
                                  Ply + 1, -B, -B + 1);
 
-            Position := Saved;
+            Position.Side := Saved_Side;
+            Position.En_Passant := Saved_Ep;
+            Position.Key := Saved_Key;
             if N_Score >= B then
                return N_Score;
             end if;

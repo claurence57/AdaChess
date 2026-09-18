@@ -151,6 +151,7 @@ package body BBChess.Movegen is
       Moves (Count) := (From => From, To => To, Piece => Piece,
                         Promotion => Promo, Flag => Flag);
    end Add;
+   pragma Inline (Add);
 
    -----------------
    -- Pseudo moves --
@@ -160,7 +161,8 @@ package body BBChess.Movegen is
      (Position : in Position_Type;
       Moves    : out Move_List;
       Count    : out Natural;
-      Tactical : in Boolean := False)
+      Tactical : in Boolean := False;
+      King_First : out Natural)
    is
       Side  : constant Color_Type := Position.Side;
       Opp   : constant Color_Type := Opposite (Side);
@@ -355,7 +357,10 @@ begin
          Pieces := Pieces and (Pieces - 1);
       end loop;
 
-      -- King (quiet moves; castling is appended separately).
+      -- King (quiet moves; castling is appended separately). Its index is
+      -- reported so the legal filter can tell the (filtered) king moves from
+      -- the plain non-king moves that precede them.
+      King_First := Count + 1;
       From := Lowest_Bit (Position.Pieces (King_Piece));
       declare
          Targets : Bitboard := King_Attacks (From) and not Own;
@@ -414,6 +419,7 @@ begin
       In_Check : out Boolean)
    is
       P_Count  : Natural;
+      King_First : Natural;
       Side     : constant Color_Type := Position.Side;
       Opp      : constant Color_Type := Opposite (Side);
       Occ      : constant Bitboard := Occupancy (Position);
@@ -427,9 +433,10 @@ begin
       -- discovered attacks along its ray).
       Occ_No_King : constant Bitboard := Occ and not Bit (King_Sq);
       -- With no checker and no absolutely pinned piece, every non-king move
-      -- is legal: the check/pin test below is then always true, so it is
-      -- skipped. This does not change which moves are emitted, nor their
-      -- order (the pseudo-legal list is walked identically).
+      -- is legal. En passant is the only exception: capturing the pawn can
+      -- uncover a rook/queen on the vacated rank, so an ep move is still
+      -- tested with a make/unmake. When there is no ep target either, the
+      -- whole non-king prefix is legal and is kept as generated.
       Fast : constant Boolean := Checkers = 0 and then Pinned = 0;
    begin
       Count := 0;
@@ -438,7 +445,7 @@ begin
       -- buffer; the legal filter then compacts them in place (Count <= I for
       -- every kept move, so no element is overwritten before it is read).
       -- This avoids a second 256-move scratch buffer (a 3 KB stack copy).
-      Generate_Pseudo_Moves (Position, Moves, P_Count, Tactical);
+      Generate_Pseudo_Moves (Position, Moves, P_Count, Tactical, King_First);
 
       if In_Check then
          if (Checkers and (Checkers - 1)) = 0 then
@@ -453,6 +460,28 @@ begin
          Check_Mask := not Bitboard (0);
       end if;
 
+      -- Fast path without en passant: the non-king prefix (everything before
+      -- the king moves, which the generator appends last) is legal as
+      -- generated, so only the king moves (and castling) are tested. Count is
+      -- advanced past the prefix without copying a single move, and the king
+      -- moves are walked from King_First exactly as the generic loop would.
+      if Fast and then Position.En_Passant = Ep_None then
+         Count := King_First - 1;
+         for I in King_First .. P_Count loop
+            declare
+               M : Move_Type renames Moves (I);
+            begin
+               if not Is_Attacked (Position, M.To, Opp, Occ_No_King) then
+                  Count := Count + 1;
+                  if Count /= I then
+                     Moves (Count) := M;
+                  end if;
+               end if;
+            end;
+         end loop;
+         return;
+      end if;
+
       for I in 1 .. P_Count loop
          declare
             M : Move_Type renames Moves (I);
@@ -464,7 +493,9 @@ begin
                -- removed from the occupancy so discovered attacks count).
                if not Is_Attacked (Position, M.To, Opp, Occ_No_King) then
                   Count := Count + 1;
-                  Moves (Count) := M;
+                  if Count /= I then
+                     Moves (Count) := M;
+                  end if;
                end if;
             elsif M.Flag = En_Passant then
                -- Rare: the make/unmake test covers the rank-discovered and
@@ -477,14 +508,18 @@ begin
                   Make_Move (Work, M, Undo);
                   if not King_In_Check (Work, Side) then
                      Count := Count + 1;
-                     Moves (Count) := M;
+                     if Count /= I then
+                        Moves (Count) := M;
+                     end if;
                   end if;
                   Unmake_Move (Work, M, Undo);
                end;
             elsif Fast then
                -- No check and no pin: the move is legal as generated.
                Count := Count + 1;
-               Moves (Count) := M;
+               if Count /= I then
+                  Moves (Count) := M;
+               end if;
             else
                -- Non-king move: must resolve the check and, when the piece is
                -- absolutely pinned, stay on its pin line.
@@ -494,7 +529,9 @@ begin
                     or else (Line (King_Sq, M.From) and Bit (M.To)) /= 0)
                then
                   Count := Count + 1;
-                  Moves (Count) := M;
+                  if Count /= I then
+                     Moves (Count) := M;
+                  end if;
                end if;
             end if;
          end;
