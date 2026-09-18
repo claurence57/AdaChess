@@ -1,5 +1,12 @@
 # AdaChess - Smart Chess Engine
 
+> **AI-assisted development.** All changes made since the initial fork (engines
+> MB and BB, scripts, tests and documentation included) were produced **with AI
+> agents**; **nothing was developed by hand**. Main model: **DeepSeek V4.1
+> Flash**; fixes and additions were guided by **prompts generated with Claude**
+> and **Kimi K3**. Base tooling: **opencode** (agent *Sisyphus* / OhMyOpenCode)
+> and **web interfaces**. (Version française dans `DEVELOPMENT.md`.)
+
 AdaChess is an open source chess engine written entirely in the Ada programming language. The official page of the engine, with more detailed information, can be found in the [Chess Programming Wiki](https://www.chessprogramming.org/AdaChess). 
 
 The main goal while developing the engine is to have fun and add new cool functionalities.

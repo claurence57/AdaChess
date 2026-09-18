@@ -8,6 +8,14 @@ n'est jamais modifié par BB : il sert d'oracle perft et d'adversaire de
 référence. La journalisation d'ingénierie fait foi dans `DEVELOPMENT.md` (racine,
 en français) ; `CHANGELOG.md` couvre les versions de BB.
 
+> **Développement assisté par IA.** Toutes les modifications apportées au projet
+> depuis le fork initial (moteurs MB et BB, scripts, tests et documentation
+> incluse) ont été réalisées **avec l'aide d'agents IA** ; **aucun développement
+> n'a été fait manuellement**. Modèle principal : **DeepSeek V4.1 Flash** ;
+> corrections et compléments apportés par des **prompts générés avec Claude** et
+> **Kimi K3**. Outils de travail de base : **opencode** (agent *Sisyphus* /
+> OhMyOpenCode) et des **interfaces web**.
+
 BB parle **XBoard/Winboard et UCI** (le protocole est choisi par la commande
 `uci`). Il gère une horloge `level`/`time`/`otim`, un livre d'ouvertures
 **Polyglot**, des tablebases **Syzygy** (via Fathom vendorisé) et le
