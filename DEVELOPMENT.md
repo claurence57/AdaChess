@@ -1240,3 +1240,31 @@ faire **avorter un match** (`Termination "abandoned"`, « disconnects ») — un
 premier essai de 30 parties s'est arrêté à la 2ᵉ. **BB n'a jamais planté**
 (aucun `adachess` dans le journal noyau) : l'instabilité est purement côté GNU,
 et la gestion du temps de BB est saine (0 forfait au temps).
+
+---
+
+## 27. Move picker (staged) — neutre (non retenu)
+
+Implémentation d'un picker incrémental (`BBChess.Move_Picker` : `Init`/`Next`
+en **sélection partielle O(n)**, filtrage TT/killers/counter, légalité
+vérifiée) intégré dans `Negamax`/`Quiescence`, en trois variantes.
+
+- **A0 — refactor pur, ordre identique** : `--bench 9` = 801 778 et
+  `--bench 11` = 2 618 135 nœuds **inchangés** ; un mode debug `--picker-check`
+  compare, nœud par nœud, l'ensemble **et l'ordre** des coups à l'ancien `Order`
+  + tri complet → **0 mismatch** (88 689 nœuds de recherche). **Aucun gain de
+  performance mesurable** : la génération reste **globale en amont** (nécessaire
+  à la détection mat/pat), donc le « staging » n'évite pas de générer les coups
+  silencieux.
+- **A1 — tri SEE des captures** (`SEE ≥ 0` d'abord, tie MVV-LVA) : `--bench 9`
+  801 778 → **654 607 nœuds (−18 %)** ; **SPRT 300 vs HEAD : NEW 92-87-121
+  (50,8 %), +5,8 ± 30,4 Elo, LOS 64,6 % → INCONCLUSIF**.
+- **A2 — counter-move** (table plombée dans le contexte) : `--bench 9` →
+  **669 442 nœuds (−16 %)** ; **SPRT 300 : NEW 95-89-116 (51,0 %), +6,9 ± 30,8
+  Elo, LOS 67,1 % → INCONCLUSIF**.
+
+Les trois variantes sont **neutres** : ni le picker seul (A0), ni le tri SEE
+(A1, cohérent avec l'échec du « tri SEE » de la Phase 2), ni le counter-move
+(A2, déjà reverté en Phase 2) n'apportent de gain significatif ; la réduction de
+nœuds ne se traduit pas en force. → **non retenu** (patch conservé hors dépôt,
+`/tmp/opencode/adachess_bb_picker*`).

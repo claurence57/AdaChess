@@ -190,6 +190,16 @@
 - **SPRT 300 parties vs HEAD : NEW 49,8 %, ≈ −1 ± 31 Elo, LOS 47 %** → **neutre,
   non retenu**. Voir `DEVELOPMENT.md` §24.
 
+### Recherche — move picker (staged) : neutre (non retenu)
+
+- Picker incrémental (`BBChess.Move_Picker`, sélection partielle O(n)) intégré à
+  `Negamax`/`Quiescence`. **A0** (ordre identique) : nœuds `--bench`
+  **inchangés** (801 778 / 2 618 135) + debug `--picker-check` « set + ordre
+  identiques » (0 mismatch). **A1** (tri SEE) : −18 % de nœuds mais
+  **SPRT +5,8 ± 30,4 Elo (LOS 64,6 %) → neutre**. **A2** (counter-move) :
+  −16 % de nœuds mais **SPRT +6,9 ± 30,8 Elo (LOS 67,1 %) → neutre**. Aucune
+  variante retenue. Voir `DEVELOPMENT.md` §27.
+
 ### Matchs — vs GNU Chess : instabilité de GNU 6.2.7
 
 - Match 2+1, 30 parties, **sans livre des deux côtés** (BB : livre masqué par le
