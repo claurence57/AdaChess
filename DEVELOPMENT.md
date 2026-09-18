@@ -1091,7 +1091,15 @@ wrapper `--params`), enchaînés automatiquement (`post_all`) :
 Aucun n'atteint le seuil de validation (règle d'or : **PASS SPRT uniquement**) →
 **non adoptés**. Le run 2 est le **meilleur signal jamais observé** sur le projet
 (≈ +20 Elo, LOS 90 %) sans être significatif ; un **SPRT étendu à 600 parties**
-(graine 13, même wrapper) a été lancé pour tenter de trancher.
+(graine 13, même wrapper) a été lancé pour trancher :
+
+- **SPRT étendu (600 part.) : NEW 185-184-231 (50,1 %), +0,6 ± 21,8 Elo,
+  LOS 52,1 %, LLR −0,08 → INCONCLUSIF.** Le +19,7 du run 2 était donc **du
+  bruit** : l'effet réel des paramètres SPSA est **≈ 0**.
+
+**Conclusion** : aucun jeu SPSA adopté. Le **tuning automatique d'éval** (Texel
+§ 7sexies/§21 comme SPSA §20) est **clos comme non concluant** sur BB — cohérent
+avec l'idée que l'éval handcrafted par défaut est déjà un bon optimum local.
 
 ---
 

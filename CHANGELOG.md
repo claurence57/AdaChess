@@ -252,8 +252,10 @@
   §20.2.
 - **Revalidations (18/09)** : run 1 = **+8,1 ± 30,2 Elo (LOS 70,1 %)** ; run 2 =
   **28/35 paramètres, +19,7 ± 30,1 Elo (LOS 90,1 %)** — meilleur signal du projet
-  mais **INCONCLUSIF** → **non adoptés** (SPRT PASS requis). SPRT étendu 600 part.
-  lancé. Voir `DEVELOPMENT.md` §20.3.
+  mais **INCONCLUSIF** → **non adoptés** (SPRT PASS requis). **SPRT étendu
+  600 part.** : **+0,6 ± 21,8 Elo (LOS 52,1 %) → le +19,7 était du bruit**, effet
+  réel ≈ 0. Tuning d'éval automatique (Texel + SPSA) **clos comme non concluant**.
+  Voir `DEVELOPMENT.md` §20.3.
 
 ### Outillage — tuning d'éval à grande échelle (dataset Lichess)
 
