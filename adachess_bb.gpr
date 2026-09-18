@@ -26,20 +26,30 @@ project AdaChess_BB is
    end Builder;
 
    package Compiler is
+      --  Integrated Ada preprocessing (-gnatep): a few sources choose an
+      --  implementation with #if REL / #else. prep.data lives in src_bb and
+      --  is referenced from obj_bb (the -gnatep path is resolved relative to
+      --  the object directory). The "release" build defines REL so PEXT is
+      --  inlined as a BMI2 intrinsic; "portable" leaves it undefined (the
+      --  data file passes -u) and uses the C shim's software fallback.
       case Mode is
          when "release" =>
             for Switches ("ada") use
               ("-gnat2012", "-gnatp", "-gnatN", "-O3", "-gnatf",
+               "-gnatep=../src_bb/prep.data", "-gnateDREL",
                "-mpopcnt", "-mbmi", "-mbmi2");
             for Switches ("c") use ("-O3", "-mpopcnt", "-mbmi", "-mbmi2");
          when "debug" =>
-            for Switches ("ada") use ("-gnat2012", "-gnata", "-g");
+            for Switches ("ada") use
+              ("-gnat2012", "-gnata", "-g",
+               "-gnatep=../src_bb/prep.data");
             for Switches ("c") use ("-O0", "-g");
          when "portable" =>
             --  No -mpopcnt/-mbmi/-mbmi2: runs on any x86-64 CPU, using the
             --  software PEXT fallback in bbchess-bits.c (~25% slower).
             for Switches ("ada") use
-              ("-gnat2012", "-gnatp", "-gnatN", "-O3", "-gnatf");
+              ("-gnat2012", "-gnatp", "-gnatN", "-O3", "-gnatf",
+               "-gnatep=../src_bb/prep.data");
             for Switches ("c") use ("-O3");
       end case;
    end Compiler;

@@ -119,17 +119,14 @@ package body BBChess.Moves is
          end;
       else
          -- A capture is detected with the opponent's occupancy (O(1)); the
-         -- victim kind is only looked up for the (few) captures.
+         -- victim kind is read from the incremental square map (also O(1)),
+         -- instead of rescanning the six opponent kind-bitboards.
          if (Position.Color_Occ (Opp) and Bit (Move.To)) /= 0 then
             declare
-               Victim : Piece_Type := Make (Opp, Pawn);
+               Victim : Piece_Type;
+               Ignored : Boolean;
             begin
-               for K in Kind_Type loop
-                  if (Position.Pieces (Make (Opp, K)) and Bit (Move.To)) /= 0 then
-                     Victim := Make (Opp, K);
-                     exit;
-                  end if;
-               end loop;
+               Ignored := Piece_At (Position, Move.To, Victim);
                Undo.Captured        := Victim;
                Undo.Has_Captured    := True;
                Undo.Captured_Square := Move.To;
@@ -230,16 +227,21 @@ package body BBChess.Moves is
                                           Rook_To (Moving, Move.Flag));
             end if;
 
-            -- Castling rights that were just lost.
-            for C in Color_Type loop
-               for CS in Castle_Side_Type loop
-                  if Undo.Castle (C, CS)
-                    and then not Position.Castle (C, CS)
-                  then
-                     K := K xor Hash.Castle_Key (C, CS);
-                  end if;
+            -- Castling rights that were just lost. The rights change only
+            -- when the king/rook moved or a rook was captured, i.e. rarely;
+            -- comparing the before/after rights tables (four booleans) lets
+            -- the common case skip the loop entirely.
+            if Position.Castle /= Undo.Castle then
+               for C in Color_Type loop
+                  for CS in Castle_Side_Type loop
+                     if Undo.Castle (C, CS)
+                       and then not Position.Castle (C, CS)
+                     then
+                        K := K xor Hash.Castle_Key (C, CS);
+                     end if;
+                  end loop;
                end loop;
-            end loop;
+            end if;
 
             -- En-passant file: remove the old one, add the new one.
             if Undo.En_Passant /= Ep_None then

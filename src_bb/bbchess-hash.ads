@@ -38,5 +38,6 @@ package BBChess.Hash is
    -- When enabled, Make_Move updates Position.Key incrementally (used by the
    -- search / transposition table). Disabled by default so move generation
    -- and perft do not pay for hashing.
+   pragma Inline (Keys_Enabled);
 
 end BBChess.Hash;

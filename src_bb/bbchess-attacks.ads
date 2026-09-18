@@ -40,6 +40,12 @@ package BBChess.Attacks is
    Between : array (Square_Type, Square_Type) of Bitboard := (others => (others => 0));
    Line    : array (Square_Type, Square_Type) of Bitboard := (others => (others => 0));
 
+   -- Full sliding rays (empty board): Rook_Attacks (S, 0) and
+   -- Bishop_Attacks (S, 0). Precomputed so Pin_Mask does not have to run
+   -- PEXT with a zero occupancy on every call.
+   Rook_Ray   : array (Square_Type) of Bitboard := (others => 0);
+   Bishop_Ray : array (Square_Type) of Bitboard := (others => 0);
+
    -- Whole file bitboards (used for bulk pawn move generation).
    File_A_BB : Bitboard := 0;
    File_H_BB : Bitboard := 0;

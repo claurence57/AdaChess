@@ -40,6 +40,7 @@ package BBChess.Eval is
                                 Square : in Square_Type) return Integer;
    -- Material + piece-square value of one piece (from White's point of
    -- view). Used by Make_Move to keep Position.Material up to date.
+   pragma Inline (Material_PST_Value);
 
    function Compute_Material (Position : in Position_Type) return Integer;
    -- Full recompute of the White-positive material + PST total. Used to

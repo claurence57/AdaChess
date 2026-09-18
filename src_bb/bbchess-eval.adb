@@ -129,6 +129,24 @@ package body BBChess.Eval is
       return Own and not Front_Blockers (Enemy, Color);
    end Passed_Pawns;
 
+   -- Union of the attack squares of every pawn in Pawns, computed with two
+   -- bulk shifts instead of one Pawn_Attacks lookup per pawn. A White pawn
+   -- on S attacks S+7 (file-1) and S+9 (file+1); the file-A / file-H masks
+   -- drop the shifts that would wrap around the board edge. The result is
+   -- exactly the OR of the per-pawn attacks.
+   function Pawn_Attack_Set (Pawns : in Bitboard;
+                             Color : in Color_Type) return Bitboard is
+   begin
+      if Color = White then
+         return ((Pawns and not File_A_BB) * 128)
+                or ((Pawns and not File_H_BB) * 512);
+      else
+         return ((Pawns and not File_A_BB) / 512)
+                or ((Pawns and not File_H_BB) / 128);
+      end if;
+   end Pawn_Attack_Set;
+   pragma Inline (Pawn_Attack_Set);
+
    -- True when a friendly pawn of Color defends Square. A pawn of Color
    -- standing on X attacks Square exactly when X is a square from which a
    -- pawn of the opposite color on Square would attack, i.e. the reverse
@@ -588,8 +606,14 @@ package body BBChess.Eval is
          declare
             Has_Pawn  : array (0 .. 7) of Boolean := (others => False);
             Front_Row : array (0 .. 7) of Natural := (others => 9);
+            -- Only the king's wing files are inspected below, so the pawn
+            -- scans can be restricted to those files (same result).
+            Wing : constant Bitboard :=
+              (if Lo = 0
+               then File_Mask (0) or File_Mask (1) or File_Mask (2)
+               else File_Mask (5) or File_Mask (6) or File_Mask (7));
          begin
-            B := Position.Pieces (Make (Color, Pawn));
+            B := Position.Pieces (Make (Color, Pawn)) and Wing;
             while B /= 0 loop
                declare
                   S : constant Square_Type := Lowest_Bit (B);
@@ -618,7 +642,7 @@ package body BBChess.Eval is
             end loop;
 
             -- Advanced enemy pawns storming the wing.
-            B := Position.Pieces (Make (Enemy, Pawn));
+            B := Position.Pieces (Make (Enemy, Pawn)) and Wing;
             while B /= 0 loop
                declare
                   S : constant Square_Type := Lowest_Bit (B);
@@ -878,30 +902,24 @@ package body BBChess.Eval is
 
       -- Threats: pawns attacking enemy pieces, and minor pieces attacking
       -- enemy rooks/queens. Computed per color and mirrored, so symmetric.
+      -- The pawn attack set is the union of the attack squares of all the
+      -- side's pawns: one bulk pair of shifts instead of a per-pawn loop.
       declare
-         P_Att : Bitboard := 0;
-         PB    : Bitboard := Own_Pawns;
+         P_Att : constant Bitboard := Pawn_Attack_Set (Own_Pawns, Color);
+         Hit : Bitboard := P_Att and Enemy_Non_Pawn;
       begin
-         while PB /= 0 loop
-            P_Att := P_Att or Pawn_Attacks (Color, Lowest_Bit (PB));
-            PB := PB and (PB - 1);
+         while Hit /= 0 loop
+            declare
+               Sq : constant Square_Type := Lowest_Bit (Hit);
+               Pc : Piece_Type;
+            begin
+               if Piece_At (Position, Sq, Pc) then
+                  Result := Result +
+                    Both (Threat_Pawn * Piece_Value (Kind (Pc)) / 100);
+               end if;
+            end;
+            Hit := Hit and (Hit - 1);
          end loop;
-         declare
-            Hit : Bitboard := P_Att and Enemy_Non_Pawn;
-         begin
-            while Hit /= 0 loop
-               declare
-                  Sq : constant Square_Type := Lowest_Bit (Hit);
-                  Pc : Piece_Type;
-               begin
-                  if Piece_At (Position, Sq, Pc) then
-                     Result := Result +
-                       Both (Threat_Pawn * Piece_Value (Kind (Pc)) / 100);
-                  end if;
-               end;
-               Hit := Hit and (Hit - 1);
-            end loop;
-         end;
       end;
 
       -- King: endgame activity replaces the home-oriented PST.

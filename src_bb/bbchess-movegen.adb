@@ -113,9 +113,8 @@ package body BBChess.Movegen is
       Bish_Q   : constant Bitboard :=
         Position.Pieces (Make (Enemy, Bishop))
         or Position.Pieces (Make (Enemy, Queen));
-      Rook_Ray : constant Bitboard := Rook_Attacks (King_Sq, 0);
-      Bish_Ray : constant Bitboard := Bishop_Attacks (King_Sq, 0);
-      Pinners  : Bitboard := (Rook_Ray and Rook_Q) or (Bish_Ray and Bish_Q);
+      Pinners  : Bitboard :=
+        (Rook_Ray (King_Sq) and Rook_Q) or (Bishop_Ray (King_Sq) and Bish_Q);
       Result   : Bitboard := 0;
    begin
       while Pinners /= 0 loop
@@ -414,7 +413,6 @@ begin
       Tactical : in Boolean;
       In_Check : out Boolean)
    is
-      Pseudo   : Move_List;
       P_Count  : Natural;
       Side     : constant Color_Type := Position.Side;
       Opp      : constant Color_Type := Opposite (Side);
@@ -428,10 +426,19 @@ begin
       -- Occupancy seen by the king after it leaves its square (reveals
       -- discovered attacks along its ray).
       Occ_No_King : constant Bitboard := Occ and not Bit (King_Sq);
+      -- With no checker and no absolutely pinned piece, every non-king move
+      -- is legal: the check/pin test below is then always true, so it is
+      -- skipped. This does not change which moves are emitted, nor their
+      -- order (the pseudo-legal list is walked identically).
+      Fast : constant Boolean := Checkers = 0 and then Pinned = 0;
    begin
       Count := 0;
       In_Check := Checkers /= 0;
-      Generate_Pseudo_Moves (Position, Pseudo, P_Count, Tactical);
+      -- The pseudo-legal moves are generated straight into the output
+      -- buffer; the legal filter then compacts them in place (Count <= I for
+      -- every kept move, so no element is overwritten before it is read).
+      -- This avoids a second 256-move scratch buffer (a 3 KB stack copy).
+      Generate_Pseudo_Moves (Position, Moves, P_Count, Tactical);
 
       if In_Check then
          if (Checkers and (Checkers - 1)) = 0 then
@@ -448,9 +455,11 @@ begin
 
       for I in 1 .. P_Count loop
          declare
-            M : Move_Type renames Pseudo (I);
+            M : Move_Type renames Moves (I);
          begin
-            if Kind (M.Piece) = King then
+            -- Only White_King / Black_King have Kind = King, so the two
+            -- direct comparisons avoid the (mod 6) decomposition of Kind.
+            if M.Piece = White_King or else M.Piece = Black_King then
                -- A king may not step onto an attacked square (with the king
                -- removed from the occupancy so discovered attacks count).
                if not Is_Attacked (Position, M.To, Opp, Occ_No_King) then
@@ -472,6 +481,10 @@ begin
                   end if;
                   Unmake_Move (Work, M, Undo);
                end;
+            elsif Fast then
+               -- No check and no pin: the move is legal as generated.
+               Count := Count + 1;
+               Moves (Count) := M;
             else
                -- Non-king move: must resolve the check and, when the piece is
                -- absolutely pinned, stay on its pin line.

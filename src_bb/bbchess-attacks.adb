@@ -44,9 +44,19 @@ package body BBChess.Attacks is
    function Square_Of (F, R : in Integer) return Square_Type is
      (Square_Type (R * 8 + F));
 
-   -- Parallel bit extract (BMI2), provided by bbchess-bits.c.
+   -- Parallel bit extract (BMI2). The release build imports the GCC builtin
+   -- directly, so PEXT is emitted inline at every call site and the
+   -- out-of-line bb_pext call disappears. The portable build keeps the C
+   -- shim (its software fallback), because the builtin needs -mbmi2.
+#if REL then
+   function Pext (X : in Bitboard; Mask : in Bitboard) return Bitboard
+     with Import, Convention => Intrinsic,
+          External_Name => "__builtin_ia32_pext_di";
+   pragma Inline (Pext);
+#else
    function Pext (X : in Bitboard; Mask : in Bitboard) return Bitboard
      with Import, Convention => C, External_Name => "bb_pext";
+#end if;
 
    -- Bitboard of the sliding attacks from From, considering Occupancy.
    function Sliding_Attacks
@@ -215,6 +225,12 @@ begin
    for R in 0 .. 7 loop
       File_A_BB := File_A_BB or Bit (Square_Type (R * 8));
       File_H_BB := File_H_BB or Bit (Square_Type (R * 8 + 7));
+   end loop;
+
+   -- Full sliding rays (empty board), reused by the pin computation.
+   for Square in Square_Type loop
+      Rook_Ray (Square)   := Rook_Attacks (Square, 0);
+      Bishop_Ray (Square) := Bishop_Attacks (Square, 0);
    end loop;
 
    -- Between / Line tables (both empty when the squares are not aligned).

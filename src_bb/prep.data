@@ -1,0 +1,5 @@
+--  Definitions for the integrated Ada preprocessor (-gnatep). Every source
+--  is preprocessed with undefined symbols treated as False (-u), so the
+--  "portable" build (which does not define REL) takes the #else branch.
+--  The "release" build defines REL (via -gnateDREL) and takes the #if branch.
+* -u
