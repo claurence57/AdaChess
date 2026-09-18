@@ -250,6 +250,10 @@
   déplacés**, revalidation SPRT 300 = **+8,1 ± 30,2 Elo, LOS 70,1 % →
   INCONCLUSIF**, **non adopté**. Run 2 (graine 2) en cours. Voir `DEVELOPMENT.md`
   §20.2.
+- **Revalidations (18/09)** : run 1 = **+8,1 ± 30,2 Elo (LOS 70,1 %)** ; run 2 =
+  **28/35 paramètres, +19,7 ± 30,1 Elo (LOS 90,1 %)** — meilleur signal du projet
+  mais **INCONCLUSIF** → **non adoptés** (SPRT PASS requis). SPRT étendu 600 part.
+  lancé. Voir `DEVELOPMENT.md` §20.3.
 
 ### Outillage — tuning d'éval à grande échelle (dataset Lichess)
 

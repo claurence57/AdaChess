@@ -1078,6 +1078,21 @@ force.
 **Run 2 (graine 2)** : en cours (≈ itér. 37/50) ; sa revalidation SPRT 300 sera
 enchaînée automatiquement (`post_all`).
 
+### 20.3 Revalidations des deux runs (18/09)
+
+Les deux runs ont été revalidés par un **SPRT 300 vs HEAD** (binaire optimisé +
+wrapper `--params`), enchaînés automatiquement (`post_all`) :
+
+- **Run 1 (graine 1)** : 22/35 paramètres déplacés ; **NEW 92-85-123 (51,2 %),
+  +8,1 ± 30,2 Elo, LOS 70,1 %, LLR +0,12 → INCONCLUSIF**.
+- **Run 2 (graine 2)** : **28/35** paramètres déplacés ; **NEW 96-79-125
+  (52,8 %), +19,7 ± 30,1 Elo, LOS 90,1 %, LLR +0,37 → INCONCLUSIF**.
+
+Aucun n'atteint le seuil de validation (règle d'or : **PASS SPRT uniquement**) →
+**non adoptés**. Le run 2 est le **meilleur signal jamais observé** sur le projet
+(≈ +20 Elo, LOS 90 %) sans être significatif ; un **SPRT étendu à 600 parties**
+(graine 13, même wrapper) a été lancé pour tenter de trancher.
+
 ---
 
 ## 21. Tuning d'éval à grande échelle — dataset Lichess CC0
