@@ -200,6 +200,12 @@
   −16 % de nœuds mais **SPRT +6,9 ± 30,8 Elo (LOS 67,1 %) → neutre**. Aucune
   variante retenue. Voir `DEVELOPMENT.md` §27.
 
+### Recherche — modulation LMR (killer) : négatif (non retenu)
+
+- Premier incrément de la modulation LMR : killer → `R−1` (réduire moins).
+  `--bench 9` −5,5 % de nœuds mais **SPRT 300 = NEW 45,0 %, −34,9 ± 29,8 Elo,
+  LOS 1,1 %** → régression nette, **non retenu**. Voir `DEVELOPMENT.md` §28.
+
 ### Matchs — vs GNU Chess : instabilité de GNU 6.2.7
 
 - Match 2+1, 30 parties, **sans livre des deux côtés** (BB : livre masqué par le

@@ -1268,3 +1268,24 @@ Les trois variantes sont **neutres** : ni le picker seul (A0), ni le tri SEE
 (A2, déjà reverté en Phase 2) n'apportent de gain significatif ; la réduction de
 nœuds ne se traduit pas en force. → **non retenu** (patch conservé hors dépôt,
 `/tmp/opencode/adachess_bb_picker*`).
+
+---
+
+## 28. Modulation du LMR (killer) — résultat négatif
+
+Seul manque réel identifié dans le LMR (audit : la table log et la re-recherche
+PVS existent déjà) : la **modulation** de la réduction. Premier incrément,
+isolé : un coup qui est **killer** à ce pli est réduit **d'un cran de moins**
+(`R := R − 1`, borné à 0), les killers étant des coups calmes connus comme forts.
+
+- `--selftest` vert, perft inchangé ; `--bench 9` 801 778 → **757 779 nœuds
+  (−5,5 %)** mais `--bench 11` 2 618 135 → **2 715 954 (+3,7 %)**.
+- **SPRT 300 vs HEAD (1+0.1, graine 7) : OLD 101-71-128, NEW 45,0 %,
+  ≈ −34,9 ± 29,8 Elo, LOS 1,1 %, LLR −0,81 → INCONCLUSIF au plafond (négatif).**
+
+Réduire moins les killers **nuit** ici : cela revient à chercher plus
+profondément des coups déjà bien ordonnancés (le killer a déjà un score d'ordre
+élevé), au prix d'un arbre plus gros par ailleurs. → **non retenu** (patch hors
+dépôt, `/tmp/opencode/adachess_bb_lmr_killer`). Restent non testés le flag
+`improving` et une modulation par l'history, mais l'échec du killer rend la
+famille peu prometteuse.
