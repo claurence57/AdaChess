@@ -1312,3 +1312,26 @@ profondément des coups déjà bien ordonnancés (le killer a déjà un score d'
 dépôt, `/tmp/opencode/adachess_bb_lmr_killer`). Restent non testés le flag
 `improving` et une modulation par l'history, mais l'échec du killer rend la
 famille peu prometteuse.
+
+---
+
+## 29. Validation en force de l'optimisation CPU (×1,59)
+
+L'optimisation du §25 est **bit-identique** (mêmes nœuds à profondeur fixe) :
+elle ne change pas la qualité des décisions mais rend la recherche **×1,58 plus
+rapide** (`--bench 9` 0,560 → 0,355 s, 1 432 → 2 258 knps). À **cadence fixe**,
+elle doit donc chercher plus profond et jouer plus fort.
+
+**SPRT 300 parties à 1+0.1** (binaire optimisé vs binaire pré-optimisation, livre
+neutralisé) :
+
+- **NEW (optimisé) 128-57-115 (61,8 %), +83,8 ± 31,2 Elo, LOS 100 %,
+  LLR +1,68 → INCONCLUSIF au plafond (positif massif).**
+
+C'est le **seul gain de force démontré et important** de la campagne
+(≈ **+84 Elo** à 1+0.1) : il valide l'optimisation CPU comme **le levier le plus
+rentable**, bien plus que les techniques de recherche/éval testées (§§22-28,
+toutes neutres ou négatives). Leçon : pour un moteur handcrafted déjà proche de
+son optimum, **la vitesse rapporte plus que les heuristiques**. Piste
+prioritaire pour la suite : **poursuivre l'optimisation CPU** (éval
+incrémentale, etc.).

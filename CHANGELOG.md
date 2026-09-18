@@ -225,6 +225,13 @@
   inchangés** (801 778 / 2 618 135), `--selftest` vert, perft 1→5 inchangé,
   build `portable` vérifié. Voir `DEVELOPMENT.md` §25.
 
+### Performance — validation en force de l'optimisation (×1,59 → +84 Elo)
+
+- SPRT 300 à 1+0.1 (binaire optimisé vs pré-optimisation, livre neutralisé) :
+  **NEW 128-57-115 (61,8 %), +83,8 ± 31,2 Elo, LOS 100 %** → le gain CPU **se
+  traduit directement en force** (~+84 Elo) : c'est le seul gain majeur de la
+  campagne. Voir `DEVELOPMENT.md` §29.
+
 ### Outillage — harnais A/B équitable
 
 - `sprt.sh`/`ab.sh` désactivent le livre des deux moteurs pendant le match
