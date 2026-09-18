@@ -232,6 +232,16 @@
   traduit directement en force** (~+84 Elo) : c'est le seul gain majeur de la
   campagne. Voir `DEVELOPMENT.md` §29.
 
+### Performance — optimisation CPU #2 (×1,13, arbre identique)
+
+- **PEXT inliné** (intrinsèque BMI2 via préprocesseur GNAT en `release`, repli
+  logiciel en `portable` ; nouveau `src_bb/prep.data`), `Make_Move` (victime
+  O(1), Zobrist roque évité), `Movegen` (chemin rapide, génération en place),
+  éval (attaques de pions par shifts, scans de roi restreints).
+- `--bench 11` **−11,9 % d'instructions** (9,43 → 8,31 G), `--bench 9` ×1,13 ;
+  **nœuds identiques** (801 778 / 2 618 135), `--selftest` et `portable` verts.
+  SPRT vs opt1 : **+13,9 ± 29,8 Elo (LOS 82 %)**. Voir `DEVELOPMENT.md` §30.
+
 ### Outillage — harnais A/B équitable
 
 - `sprt.sh`/`ab.sh` désactivent le livre des deux moteurs pendant le match

@@ -1335,3 +1335,33 @@ toutes neutres ou négatives). Leçon : pour un moteur handcrafted déjà proche
 son optimum, **la vitesse rapporte plus que les heuristiques**. Piste
 prioritaire pour la suite : **poursuivre l'optimisation CPU** (éval
 incrémentale, etc.).
+
+---
+
+## 30. Optimisation CPU #2 (×1,13) — adoptée
+
+Deuxième passe de profilage `perf` (§29 ayant montré que la vitesse se traduit
+en force). Changements **sans modification de comportement** (`--bench 9` /
+`--bench 11` toujours **801 778 / 2 618 135** nœuds, `--selftest` vert,
+`portable` vert) :
+
+- **PEXT inliné** : `bbchess-attacks.adb` sélectionne à la compilation
+  l'intrinsèque BMI2 (`__builtin_ia32_pext_di`, build `release`, via le
+  préprocesseur intégré GNAT `-gnatep` + `-gnateDREL`) ou le repli logiciel
+  (`portable`). Nouveau fichier de build `src_bb/prep.data`.
+- **`Make_Move`** : victime lue dans la carte O(1) `Squares` (plus de scan des 6
+  bitboards) ; boucle Zobrist des droits de roque évitée quand les droits ne
+  changent pas.
+- **`Movegen`** : chemin rapide sans échec/épingle ; test `Piece = Roi` au lieu
+  de la décomposition mod-6 ; génération en place (plus de copie de pile 3 Ko) ;
+  rayons précalculés pour `Pin_Mask`.
+- **Éval** : ensemble d'attaque des pions par deux shifts ; scans de pions de
+  `King_Safety` restreints aux 3 colonnes de l'aile ; `Material_PST_Value`
+  inline.
+
+**Mesure** : `--bench 11` **9,43 G → 8,31 G instructions (−11,9 %)** ; `--bench 9`
+0,326 → 0,288 s (×1,13). **SPRT 300 à 1+0.1 vs opt1 : NEW 92-80-128 (52,0 %),
++13,9 ± 29,8 Elo, LOS 82,0 % → positif mais non significatif** (cohérent avec
+l'effet attendu ≈ +20 Elo pour un gain de vitesse de ×1,13). Adoptée sur le
+critère **objectif** (arbre bit-identique + plus rapide + self-test vert), comme
+opt1 (§25).
