@@ -1365,3 +1365,30 @@ en force). Changements **sans modification de comportement** (`--bench 9` /
 l'effet attendu ≈ +20 Elo pour un gain de vitesse de ×1,13). Adoptée sur le
 critère **objectif** (arbre bit-identique + plus rapide + self-test vert), comme
 opt1 (§25).
+
+---
+
+## 31. Optimisation CPU #3 (×1,13) — adoptée
+
+Troisième passe (profilage + optimisation), toujours **sans changement de
+comportement** (`--bench 9/11` = **801 778 / 2 618 135** nœuds, `--selftest`
+vert, éval **byte-identique** sur 41 positions, bestmoves identiques à
+profondeur 8 et 10, `portable` vert) :
+
+- **`Movegen`** : `Generate_Pseudo_Moves` signale `King_First` ; chemin rapide
+  (sans échec/épingle/ep) qui **avance `Count` au-delà du préfixe non-roi** sans
+  copier un seul coup, puis filtre la queue du roi ; boucle générique sans
+  auto-copie ; `Add` inliné.
+- **Éval** : boucle de mobilité scindée en 4 corps littéraux (pliage des
+  `Piece_Attacks`/poids) ; `Game_Phase` un popcount par type sur l'union ;
+  test de colonne de tempête supprimé (masque d'aile déjà restrictif) ;
+  isolés via `Neighbor_Files` précalculé ; `Front_Blockers` hissé.
+- **SEE** : copie de travail réduite à un `See_Board` bitboard-only (12 boards +
+  2 occupations) au lieu d'une `Position` complète ; `Pin_Mask_See` local.
+- **`Negamax`** : le null-move ne sauve/restaure que `Side`/`En_Passant`/`Key`
+  au lieu de copier toute la `Position`.
+
+**Mesure** : `--bench 11` **8,31 G → 7,29 G instructions (−12,2 %)** ; `--bench 9`
+0,326 → 0,274 s. **SPRT 300 à 1+0.1 vs opt2 : NEW 96-82-122 (52,3 %),
++16,2 ± 30,3 Elo, LOS 85,3 % → positif (non significatif).** Adoptée sur le
+même critère objectif que opt1/opt2.

@@ -242,6 +242,15 @@
   **nœuds identiques** (801 778 / 2 618 135), `--selftest` et `portable` verts.
   SPRT vs opt1 : **+13,9 ± 29,8 Elo (LOS 82 %)**. Voir `DEVELOPMENT.md` §30.
 
+### Performance — optimisation CPU #3 (×1,13, arbre identique)
+
+- **Movegen** (préfixe non-roi sans copie, `King_First`, `Add` inliné), **SEE**
+  (copie bitboard-only), **éval** (mobilité scindée, phase, pions), **null-move**
+  (copie minimale). `--bench 11` **−12,2 % d'instructions** (8,31 → 7,29 G),
+  `--bench 9` 0,326 → 0,274 s ; **nœuds identiques**, éval byte-identique,
+  `--selftest`/`portable` verts. SPRT vs opt2 : **+16,2 ± 30,3 Elo, LOS 85 %**.
+  Voir `DEVELOPMENT.md` §31.
+
 ### Outillage — harnais A/B équitable
 
 - `sprt.sh`/`ab.sh` désactivent le livre des deux moteurs pendant le match
