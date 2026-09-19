@@ -1474,3 +1474,26 @@ popcounts de menace par type, prefetch des deux entrées du bucket, hoist du roi
 LOS 84,1 % → positif (non significatif).** Adoptée sur le même critère objectif
 que opt1/opt2/opt3 (arbre bit-identique, éval byte-identique, plus rapide).
 Voir `CHANGELOG.md`.
+
+---
+
+## 34. Modulation du LMR par le flag `improving` (Phase 3b) — résultat négatif
+
+Dernier item non testé de la famille « modulation LMR » (Phase 3). Implémentation
+**canonique** : éval statique mémorisée par pli (`Eval_Path`), et
+`Improving := Eval_Now > Eval_{même camp, 2 plis avant} − 10` ; un coup calme
+tardif à profondeur ≥ 3 est **réduit d'un pli de plus** si `not Improving`.
+L'éval du nœud est calculée une seule fois et réutilisée par razoring/futilité.
+(La comparaison se fait à **2 plis** — même camp — et non à 1 pli : un écart d'un
+pli change de perspective et mesure le tempo, cf. Stockfish/Ethereal.)
+
+- `--selftest` vert, perft 1→5 inchangé, partie complète sans erreur ;
+  `--bench 9` 801 778 → **733 011 nœuds** ; `--bench 11` 2 618 135 → **2 298 616**.
+- **SPRT 300 vs opt1-3 (1+0.1, graine 7) : NEW 71-89-140, 47,0 %,
+  −20,9 ± 28,7 Elo, LOS 7,7 %, LLR −0,55 → INCONCLUSIF au plafond (négatif).**
+
+Avec la variante killer (§28, ≈ −35 Elo), la **modulation du LMR est close :
+les deux formes testées nuisent**. Le LMR de base (table log + re-recherche PVS)
+est conservé tel quel. → **non retenu** (patch hors dépôt,
+`/tmp/opencode/adachess_bb_p3b`). Reste la modulation par l'**history**, non
+testée, mais que l'échec des deux autres formes rend peu prometteuse.

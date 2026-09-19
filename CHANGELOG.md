@@ -270,6 +270,13 @@ du moteur actuel vs baseline pré-optimisation : **NEW 122-19-86 (72,7 %),
 La 4ᵉ passe (§33) ajoute **×1,08** (cumul ≈ **×2,17**). Voir `DEVELOPMENT.md`
 §32-33.
 
+### Recherche — modulation du LMR par `improving` (rejetée)
+
+Flag `improving` (éval à 2 plis, même camp) modulant le LMR : arbre réduit
+(bench 9 801 778 → 733 011) mais **SPRT 300 : −20,9 ± 28,7 Elo, LOS 8 %** →
+**négatif**. Avec la variante killer (§28), la modulation LMR est close.
+Voir `DEVELOPMENT.md` §34.
+
 ### Outillage — harnais A/B équitable
 
 - `sprt.sh`/`ab.sh` désactivent le livre des deux moteurs pendant le match
