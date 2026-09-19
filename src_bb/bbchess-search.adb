@@ -746,9 +746,6 @@ package body BBChess.Search is
    -- Aspiration window around the previous iteration score (centipawns).
    Aspiration_Window : constant Score_Type := 40;
 
-   -- Null move reduction.
-   Null_Reduction  : constant := 2;
-
    -- Late-move reduction table: reduction applied to a late quiet move as a
    -- function of the remaining depth and the move index (both capped), from
    -- the classic log formula, precomputed once at elaboration.
@@ -959,8 +956,19 @@ package body BBChess.Search is
             Saved_Side : constant Color_Type := Position.Side;
             Saved_Ep   : constant Integer := Position.En_Passant;
             Saved_Key  : constant Bitboard := Position.Key;
+            -- Standard adaptive null-move reduction: deeper nodes get a
+            -- larger reduction (R = 3 + Depth / 4, integer division).
+            N_Reduction : constant Natural := 3 + Depth / 4;
+            N_Depth     : Natural;
             N_Score    : Score_Type;
          begin
+            -- Guard the child depth so it stays a valid Natural: at shallow
+            -- depth the adaptive formula can reach or exceed Depth - 1.
+            if N_Reduction >= Depth - 1 then
+               N_Depth := 0;
+            else
+               N_Depth := Depth - 1 - N_Reduction;
+            end if;
             if Position.En_Passant /= Ep_None then
                Position.Key :=
                  Position.Key xor Hash.Ep_Key (Position.En_Passant mod 8);
@@ -969,7 +977,7 @@ package body BBChess.Search is
             Position.Side := Opposite (Position.Side);
             Position.Key := Position.Key xor Hash.Side_Key;
 
-            N_Score := -Negamax (Ctx, Position, Depth - 1 - Null_Reduction,
+            N_Score := -Negamax (Ctx, Position, N_Depth,
                                  Ply + 1, -B, -B + 1);
 
             Position.Side := Saved_Side;
