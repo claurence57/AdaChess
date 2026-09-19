@@ -447,10 +447,121 @@ procedure AdaChess_BB is
       end loop;
    end Apply_UCI_Position;
 
-   -- "go wtime .. btime .. winc .. binc .. movestogo .. depth .. movetime ..".
+   ----------------------------
+   -- Asynchronous UCI search --
+   ----------------------------
+
+   -- Phase 5: the UCI search runs in a task so that the command loop keeps
+   -- reading stdin while it thinks. "isready" then answers "readyok" during a
+   -- search, "stop" sets the stop request the search polls, and "quit" stops
+   -- the search before leaving. The search parameters are handed over through
+   -- the task entry (copied), so the command loop is released as soon as they
+   -- are received; the search itself runs outside the rendezvous.
+
+   -- All UCI output goes through BBChess.Search.Locked_Put_Line, whose lock
+   -- is shared with the XBoard "post" iteration reports: Ada.Text_IO is not
+   -- task-safe and the search task may print while the command loop answers
+   -- "readyok".
+
+   protected type UCI_Status is
+      procedure Set_Busy (B : in Boolean);
+      function Busy return Boolean;
+   private
+      Is_Busy : Boolean := False;
+   end UCI_Status;
+
+   protected body UCI_Status is
+      procedure Set_Busy (B : in Boolean) is
+      begin
+         Is_Busy := B;
+      end Set_Busy;
+
+      function Busy return Boolean is
+      begin
+         return Is_Busy;
+      end Busy;
+   end UCI_Status;
+
+   UCI_Busy : UCI_Status;
+
+   task type UCI_Search_Task is
+      entry Start (P : in Position_Type; D : in Natural;
+                   T : in Duration; Node_Cap : in Natural);
+      entry Stop_Now;
+   end UCI_Search_Task;
+
+   task body UCI_Search_Task is
+      Position : Position_Type;
+      M        : Move_Type;
+      Depth    : Natural;
+      Budget   : Duration;
+      Cap      : Natural;
+   begin
+      loop
+         select
+            accept Start (P : in Position_Type; D : in Natural;
+                          T : in Duration; Node_Cap : in Natural)
+            do
+               Position := P;
+               Depth  := D;
+               Budget := T;
+               Cap    := Node_Cap;
+               -- Busy from the moment the request is taken, and a "stop"
+               -- that arrived after the previous search ended must not
+               -- abort this one.
+               UCI_Busy.Set_Busy (True);
+               Clear_Stop;
+            end Start;
+
+            M := Best_Move (Position, Depth, Budget, Cap);
+
+            UCI_Busy.Set_Busy (False);
+            if M = Empty_Move then
+               Locked_Put_Line ("bestmove 0000");
+            else
+               Locked_Put_Line ("bestmove " & To_String (M));
+            end if;
+         or
+            accept Stop_Now;
+            exit;
+         end select;
+      end loop;
+   end UCI_Search_Task;
+
+   type UCI_Search_Task_Access is access UCI_Search_Task;
+
+   -- Created on the first UCI search only: the special modes (--selftest,
+   -- --bench, ...) return before any "go", so no task is ever left running.
+   Active_Task : UCI_Search_Task_Access := null;
+
+   procedure Ensure_UCI_Task is
+   begin
+      if Active_Task = null then
+         Active_Task := new UCI_Search_Task;
+      end if;
+   end Ensure_UCI_Task;
+
+   -- Stop a running search (if any) and terminate the task. Safe to call when
+   -- no task exists (XBoard-only session) or when the task is idle.
+   procedure Shutdown_UCI_Search is
+   begin
+      if Active_Task /= null then
+         if UCI_Busy.Busy then
+            Request_Stop;
+         end if;
+         Active_Task.Stop_Now;
+         Active_Task := null;
+      end if;
+   end Shutdown_UCI_Search;
+
+   -- "go wtime .. btime .. winc .. binc .. movestogo .. depth .. movetime ..
+   --  nodes .. infinite". The search runs asynchronously in a task (Phase 5);
+   --  the command loop stays free to answer "isready" and to service "stop".
    procedure Handle_UCI_Go (Par : in String) is
-      N : constant Natural := Token_Count (Par);
-      I : Natural := 1;
+      N        : constant Natural := Token_Count (Par);
+      I        : Natural := 1;
+      Infinite : Boolean := False;
+      Node_Cap : Natural := 0;
    begin
       Fixed_Time := False;
       Clock_Left := 0.0;
@@ -476,32 +587,48 @@ procedure AdaChess_BB is
                Move_Time := Parse_Duration (Next, 1.0) / 1000.0;
             elsif Name = "depth" then
                Max_Depth := Parse_Natural (Next, 64);
+            elsif Name = "nodes" then
+               Node_Cap := Parse_Natural (Next, 0);
+            elsif Name = "infinite" then
+               Infinite := True;
             end if;
          end;
          I := I + 1;
       end loop;
 
-      -- Opening book.
-      declare
-         BM : Move_Type;
-      begin
-         if Try_Book (BM) then
-            Ada.Text_IO.Put_Line ("bestmove " & To_String (BM));
-            Ada.Text_IO.Flush;
-            return;
-         end if;
-      end;
+      -- Opening book: only for a normal timed/depth move, never for the
+      -- "infinite" / "nodes" analysis modes (which must run the search).
+      if not Infinite and then Node_Cap = 0 then
+         declare
+            BM : Move_Type;
+         begin
+            if Try_Book (BM) then
+               Locked_Put_Line ("bestmove " & To_String (BM));
+               return;
+            end if;
+         end;
+      end if;
 
+      -- Time budget handed to the search. "infinite" and "nodes" ignore the
+      -- clock: they are bounded only by "stop" / the node cap. A normal move
+      -- keeps the exact pre-Phase-5 budget (so fixed-depth play is unchanged).
       declare
-         M : constant Move_Type :=
-           Best_Move (Pos, Max_Depth, Time_For_Next_Move);
+         Budget : Duration;
       begin
-         if M = Empty_Move then
-            Ada.Text_IO.Put_Line ("bestmove 0000");
+         if Infinite or else Node_Cap > 0 then
+            Budget := 0.0;
          else
-            Ada.Text_IO.Put_Line ("bestmove " & To_String (M));
+            Budget := Time_For_Next_Move;
          end if;
-         Ada.Text_IO.Flush;
+
+         -- A running search (double "go") is stopped first; the task then
+         -- accepts this Start and the queued request runs next.
+         if UCI_Busy.Busy then
+            Request_Stop;
+         end if;
+
+         Ensure_UCI_Task;
+         Active_Task.Start (Pos, Max_Depth, Budget, Node_Cap);
       end;
    end Handle_UCI_Go;
 
@@ -743,8 +870,9 @@ begin
              Ada.Text_IO.Flush;
 
           elsif Cmd = "isready" and then UCI_Mode then
-             Ada.Text_IO.Put_Line ("readyok");
-             Ada.Text_IO.Flush;
+             -- Answered from the command loop, so it replies "readyok" even
+             -- while the search task is thinking.
+             Locked_Put_Line ("readyok");
 
           elsif Cmd = "ucinewgame" and then UCI_Mode then
              Reset_Search;
@@ -756,9 +884,15 @@ begin
           elsif Cmd = "go" and then UCI_Mode then
              Handle_UCI_Go (Par);
 
+          elsif Cmd = "stop" and then UCI_Mode then
+             -- Interrupt the running search; it prints "bestmove" itself.
+             if UCI_Busy.Busy then
+                Request_Stop;
+             end if;
+
           elsif UCI_Mode
-            and then (Cmd = "stop" or else Cmd = "ponderhit"
-                      or else Cmd = "debug" or else Cmd = "register")
+            and then (Cmd = "ponderhit" or else Cmd = "debug"
+                      or else Cmd = "register")
           then
              null;
 
@@ -938,6 +1072,9 @@ begin
             null;
 
           elsif Cmd = "quit" or else Cmd = "exit" then
+             -- Stop any running UCI search before leaving, so the process
+             -- exits promptly and no task is left active.
+             Shutdown_UCI_Search;
              exit Main_Loop;
 
          else
@@ -963,6 +1100,7 @@ begin
    Ada.Text_IO.Put_Line ("Thanks for playing with AdaChess-BB!");
 exception
    -- A clean close of the input (e.g. the GUI quitting) must not abort.
+   -- If a UCI search is still running, stop it so the process can exit.
    when Ada.IO_Exceptions.End_Error =>
-      null;
+      Shutdown_UCI_Search;
 end AdaChess_BB;

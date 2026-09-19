@@ -197,6 +197,7 @@ package body BBChess.Search is
          Nodes_Count      : Natural := 0;
          Next_Checkpoint  : Natural := Check_Interval;
          Time_Limit_Armed : Boolean := False;
+         Node_Limit       : Natural := 0;
          Start_Time       : Time := Clock;
          Time_Budget      : Duration := 0.0;
       end record;
@@ -209,6 +210,13 @@ package body BBChess.Search is
    -- Set by the primary thread to stop the helpers promptly.
    Stop_Search : Boolean := False;
    pragma Atomic (Stop_Search);
+
+   -- External stop request (UCI "stop"/"quit"). Kept separate from
+   -- Stop_Search, which the Lazy SMP primary thread clears between searches:
+   -- the command loop may set this at any time and it is only cleared by an
+   -- explicit Clear_Stop before a new search starts.
+   Abort_Request : Boolean := False;
+   pragma Atomic (Abort_Request);
 
    procedure Set_Game_History (Keys  : in Game_Key_Array;
                                Count : in Natural) is
@@ -225,7 +233,8 @@ package body BBChess.Search is
 
    procedure Init_Context (Ctx    : in Context_Access;
                            Arm    : in Boolean;
-                           Budget : in Duration) is
+                           Budget : in Duration;
+                           Node_Cap : in Natural := 0) is
    begin
       Ctx.Killers := (others => (others => Empty_Move));
       Ctx.History := (others => (others => (others => 0)));
@@ -238,6 +247,7 @@ package body BBChess.Search is
       Ctx.Next_Checkpoint := Check_Interval;
       Ctx.Time_Limit_Armed := Arm;
       Ctx.Time_Budget := Budget;
+      Ctx.Node_Limit := Node_Cap;
       Ctx.Start_Time := Clock;
    end Init_Context;
 
@@ -246,12 +256,15 @@ package body BBChess.Search is
       Ctx.Nodes_Count := Ctx.Nodes_Count + 1;
       if Ctx.Nodes_Count >= Ctx.Next_Checkpoint then
          Ctx.Next_Checkpoint := Ctx.Nodes_Count + Check_Interval;
-         if Stop_Search then
+         if Stop_Search or else Abort_Request then
             raise Search_Interrupted;
          end if;
          if Ctx.Time_Limit_Armed
            and then To_Duration (Clock - Ctx.Start_Time) >= Ctx.Time_Budget
          then
+            raise Search_Interrupted;
+         end if;
+         if Ctx.Node_Limit > 0 and then Ctx.Nodes_Count >= Ctx.Node_Limit then
             raise Search_Interrupted;
          end if;
       end if;
@@ -391,6 +404,26 @@ package body BBChess.Search is
       Post_Output := On;
    end Set_Post;
 
+   -- Single console lock shared by the command loop and the search threads
+   -- (Ada.Text_IO is not task-safe). Both the XBoard "post" iteration reports
+   -- and the UCI "readyok"/"bestmove" lines go through it.
+   protected Console is
+      procedure Put_Line (S : in String);
+   end Console;
+
+   protected body Console is
+      procedure Put_Line (S : in String) is
+      begin
+         Ada.Text_IO.Put_Line (S);
+         Ada.Text_IO.Flush;
+      end Put_Line;
+   end Console;
+
+   procedure Locked_Put_Line (S : in String) is
+   begin
+      Console.Put_Line (S);
+   end Locked_Put_Line;
+
    procedure Report_Iteration (Depth      : in Natural;
                                Score      : in Score_Type;
                                Elapsed    : in Duration;
@@ -399,6 +432,16 @@ package body BBChess.Search is
       Centis : constant Long_Integer :=
         Long_Integer (Elapsed * 100.0);
       Disp   : Score_Type := Score;
+      -- One iteration line: depth + score + centiseconds + nodes + move.
+      -- Ample for any value the engine can print.
+      Line   : String (1 .. 80);
+      Last   : Natural := 0;
+
+      procedure Append (S : in String) is
+      begin
+         Line (Last + 1 .. Last + S'Length) := S;
+         Last := Last + S'Length;
+      end Append;
    begin
       if not Post_Output then
          return;
@@ -412,15 +455,14 @@ package body BBChess.Search is
          Disp := -(100_000 - (Mate_Score + Score));
       end if;
 
-      Ada.Text_IO.Put
-        (Natural'Image (Depth) & " " & Score_Type'Image (Disp)
-         & " " & Long_Integer'Image (Centis)
-         & " " & Natural'Image (Nodes));
+      Append (Natural'Image (Depth));
+      Append (" " & Score_Type'Image (Disp));
+      Append (" " & Long_Integer'Image (Centis));
+      Append (" " & Natural'Image (Nodes));
       if Best /= Empty_Move then
-         Ada.Text_IO.Put (" " & To_String (Best));
+         Append (" " & To_String (Best));
       end if;
-      Ada.Text_IO.New_Line;
-      Ada.Text_IO.Flush;
+      Console.Put_Line (Line (1 .. Last));
    end Report_Iteration;
 
    -- True when Position has already occurred on the current line. A single
@@ -1353,6 +1395,16 @@ package body BBChess.Search is
       end if;
    end Set_Threads;
 
+   procedure Request_Stop is
+   begin
+      Abort_Request := True;
+   end Request_Stop;
+
+   procedure Clear_Stop is
+   begin
+      Abort_Request := False;
+   end Clear_Stop;
+
    protected type Completion is
       procedure Reset;
       procedure Signal;
@@ -1383,6 +1435,7 @@ package body BBChess.Search is
    Root_Position  : Position_Type;
    Root_Max_Depth : Natural := 1;
    Root_Time      : Duration := 0.0;
+   Root_Node_Cap  : Natural := 0;
    Results        : array (1 .. Max_Threads) of Thread_Result;
 
    task type Searcher (Id : Positive);
@@ -1390,7 +1443,8 @@ package body BBChess.Search is
    task body Searcher is
       Ctx : constant Context_Access := new Search_Context;
    begin
-      Init_Context (Ctx, Arm => Root_Time > 0.0, Budget => Root_Time);
+      Init_Context (Ctx, Arm => Root_Time > 0.0, Budget => Root_Time,
+                    Node_Cap => Root_Node_Cap);
       Results (Id) := Iterative_Search (Ctx, Root_Position,
                                         Root_Max_Depth, Root_Time,
                                         Report => (Id = 1));
@@ -1403,9 +1457,11 @@ package body BBChess.Search is
 
    type Searcher_Access is access Searcher;
 
+   -- Fixed-depth + time + node cap: the actual implementation.
    function Best_Move (Position   : in Position_Type;
-                       Max_Depth  : in Natural;
-                       Time_Alloc : in Duration) return Move_Type
+                        Max_Depth  : in Natural;
+                        Time_Alloc : in Duration;
+                        Node_Cap   : in Natural) return Move_Type
    is
       Best : Move_Type := Empty_Move;
    begin
@@ -1421,7 +1477,8 @@ package body BBChess.Search is
             Ctx    : constant Context_Access := new Search_Context;
             Result : Thread_Result;
          begin
-            Init_Context (Ctx, Arm => Time_Alloc > 0.0, Budget => Time_Alloc);
+            Init_Context (Ctx, Arm => Time_Alloc > 0.0, Budget => Time_Alloc,
+                          Node_Cap => Node_Cap);
             Result := Iterative_Search (Ctx, Position, Max_Depth,
                                         Time_Alloc, True);
             Accum_Nodes := Accum_Nodes + Ctx.Nodes_Count;
@@ -1436,6 +1493,7 @@ package body BBChess.Search is
       Root_Position := Position;
       Root_Max_Depth := Max_Depth;
       Root_Time := Time_Alloc;
+      Root_Node_Cap := Node_Cap;
       Stop_Search := False;
       Done.Reset;
 
@@ -1474,6 +1532,14 @@ package body BBChess.Search is
          Best := Quick_Move (Position);
       end if;
       return Best;
+   end Best_Move;
+
+   -- Timed entry point unchanged for XBoard play: no node cap.
+   function Best_Move (Position   : in Position_Type;
+                       Max_Depth  : in Natural;
+                       Time_Alloc : in Duration) return Move_Type is
+   begin
+      return Best_Move (Position, Max_Depth, Time_Alloc, 0);
    end Best_Move;
 
 end BBChess.Search;

@@ -58,6 +58,29 @@ package BBChess.Search is
    -- so a move is always returned close to the budget even when a single
    -- iteration would need much longer. Used for XBoard play.
 
+   function Best_Move (Position   : in Position_Type;
+                        Max_Depth  : in Natural;
+                        Time_Alloc : in Duration;
+                        Node_Cap   : in Natural) return Move_Type;
+   -- Same as above plus a node cap: the search also stops once Node_Cap
+   -- nodes have been visited (0 = no cap). The cap is polled inside the
+   -- recursion like the deadline, so a move is returned within one poll
+   -- interval of the cap. Used by the UCI "go nodes" command.
+
+   procedure Request_Stop;
+   -- Ask the running timed Best_Move to return as soon as possible (polled
+   -- inside the recursion). The caller keeps the last completed iteration.
+   -- Used by the UCI "stop" and "quit" commands.
+
+   procedure Clear_Stop;
+   -- Cancel a pending stop request before starting a new search.
+
+   procedure Locked_Put_Line (S : in String);
+   -- Print one line to standard output under the package-wide console lock.
+   -- Ada.Text_IO is not task-safe and the Phase 5 UCI search runs in a task,
+   -- so the command loop ("readyok", "bestmove") and the XBoard "post"
+   -- iteration reports go through this single lock.
+
    procedure Reset_Search;
    -- Clear the per-search heuristics (transposition table, killers and
    -- history) between games. The position-independent data must not leak
