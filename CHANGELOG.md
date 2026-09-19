@@ -315,6 +315,18 @@ passes (bench 9 0,561 → 0,264 s, ×2,12) : **NEW 144-42-114 (67,0 %),
   aléatoires), bestmoves identiques d8/d10, `--selftest`/`portable` verts.
   SPRT vs opt5 : **+8,1 ± 28,1 Elo, LOS 71 %**. Voir `DEVELOPMENT.md` §37.
 
+### Recherche — NMP adaptatif et borne de quiescence (adoptées)
+
+- **NMP à réduction adaptative** : `R := 3 + Depth/4` au lieu de `R = 2` fixe
+  (gardes `Depth>=3`, hors échec, `Has_Non_Pawn` conservées). Nœuds 801 778 →
+  593 786 (−25,9 %) / 2 618 135 → 1 585 577 (−39,4 %) ; **SPRT +18,5 ± 28,9 Elo,
+  LOS 90 %**.
+- **Borne de quiescence** `Max_Q_Depth = 8` : au plafond, stand‑pat borné alpha
+  hors échec, toutes les évasions notées statiquement en échec (mat préservé).
+  Nœuds −6,4 % / −21,9 % ; **SPRT +15,1 ± 29,7 Elo, LOS 84 %**.
+- Combiné : **+10,4 ± 29,4 Elo, LOS 76 %** (subadditif). Audit complet
+  (existant vs ajouté) dans `NOTES_TUNING.md`. Voir `DEVELOPMENT.md` §38.
+
 ### Recherche — modulation du LMR par `improving` (rejetée)
 
 Flag `improving` (éval à 2 plis, même camp) modulant le LMR : arbre réduit

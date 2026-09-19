@@ -1641,3 +1641,33 @@ que opt1-opt5. Patch hors dépôt : `/tmp/opencode/opt6.patch`, binaire
 un TT « scindé clé/données » ou un layout par buckets qui changerait les entrées
 acceptées (interdit sans changer l'arbre) ; le stall mémoire dans `Negamax`
 (~35 %) est désormais **considéré épuisé** côté micro-optimisations sûres.
+
+---
+
+## 38. Recherche — NMP adaptatif et borne de quiescence (deux gains)
+
+Audit du prompt « chantiers 1‑3 » (détail dans `NOTES_TUNING.md`) : NMP, LMR,
+futility, razoring, delta pruning, SEE<0 et évasions complètes **existaient
+déjà** ; l'éval est **déjà tapered** et le tuning Texel **déjà fait** (§21,
+négatif). Seuls deux vrais manques ont été comblés, chacun validé par SPRT
+300 à 1+0,1 vs HEAD (livre neutralisé).
+
+**1. NMP à réduction adaptative** (commit `36aff42`) — `R := 3 + Depth/4`
+(division entière, clamp du child depth), au lieu de `R = 2` fixe ; gardes
+`Depth >= 3` / hors échec / `Has_Non_Pawn` conservées.
+
+- Nœuds : 801 778 → **593 786** (−25,9 %) ; 2 618 135 → **1 585 577** (−39,4 %).
+- **SPRT : +18,5 ± 28,9 Elo, LOS 89,6 % → positif.**
+
+**2. Borne de profondeur en quiescence** (commit `f4437fc`) — `Max_Q_Depth = 8` ;
+au plafond, nœud calme → stand‑pat borné par alpha ; nœud **en échec** → toutes
+les évasions générées et notées statiquement (pas de récursion), donc jamais
+d'éval statique d'une position en échec et mat/joueur pat préservés.
+
+- Nœuds : 801 778 → **750 402** (−6,4 %) ; 2 618 135 → **2 043 401** (−21,9 %).
+- **SPRT : +15,1 ± 29,7 Elo, LOS 84,0 % → positif.**
+
+**Effet combiné** (SPRT 300 vs HEAD) : **+10,4 ± 29,4 Elo, LOS 75,7 % →
+positif** (subadditif — les deux élags portent sur des lignes proches, mais
+chaque delta est individuellement positif). Gates : `--selftest` vert, perft
+1→5 identique, mat détecté, self‑play propre, `portable` vert pour les deux.
