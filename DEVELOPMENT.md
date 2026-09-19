@@ -1392,3 +1392,24 @@ profondeur 8 et 10, `portable` vert) :
 0,326 → 0,274 s. **SPRT 300 à 1+0.1 vs opt2 : NEW 96-82-122 (52,3 %),
 +16,2 ± 30,3 Elo, LOS 85,3 % → positif (non significatif).** Adoptée sur le
 même critère objectif que opt1/opt2.
+
+---
+
+## 32. Bilan force des optimisations CPU (capstone) — ×2,01 vitesse, +170 Elo
+
+Mesure agrégée des trois passes (§29-31) par un **SPRT 300 à 1+0,1** entre le
+moteur actuel (opt1+opt2+opt3) et la **baseline d'avant toute optimisation** :
+
+| | avant (pre-opt) | après (opt1+2+3) | facteur |
+|---|---|---|---|
+| `--bench 9` | 0,589 s | 0,278 s | **×2,12** |
+| knps | 1 360 | 2 880 | **×2,12** |
+
+**SPRT** : NEW 122-19-86 (**72,7 %**), **+170,0 ± 36,8 Elo, LOS 100 % →
+VERDICT PASS (H1 accepté)**. L'arbre reste **bit-identique**
+(801 778 / 2 618 135 nœuds) : le gain est **purement** dû à la vitesse.
+
+Conclusion : sur ce moteur, le **seul levier de force démontré** est
+l'optimisation CPU (≈ ×2 vitesse ⇒ ≈ +170 Elo) ; le tuning de l'évaluation
+(Texel, SPSA, §20-21) est resté **neutre/négatif**. Priorité future : continuer
+le profilage et l'optimisation.

@@ -251,6 +251,13 @@
   `--selftest`/`portable` verts. SPRT vs opt2 : **+16,2 ± 30,3 Elo, LOS 85 %**.
   Voir `DEVELOPMENT.md` §31.
 
+### Bilan — optimisations CPU cumulées (×2,01, +170 Elo)
+
+Trois passes d'optimisation sans changement d'arbre (§29-31). SPRT 300 à 1+0,1
+du moteur actuel vs baseline pré-optimisation : **NEW 122-19-86 (72,7 %),
++170,0 ± 36,8 Elo, LOS 100 %, PASS**. `--bench 9` 0,589 → 0,278 s (×2,1).
+Voir `DEVELOPMENT.md` §32.
+
 ### Outillage — harnais A/B équitable
 
 - `sprt.sh`/`ab.sh` désactivent le livre des deux moteurs pendant le match
