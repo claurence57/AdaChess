@@ -73,6 +73,23 @@ package body BBChess.Board is
         Position.Color_Occ (Pieces.Color (Piece)) and M;
    end Remove_Piece;
 
+   ----------------
+   -- Move_Piece --
+   ----------------
+
+   procedure Move_Piece
+     (Position : in out Position_Type; Piece : in Piece_Type;
+      From, To : in Square_Type)
+   is
+      Flip : constant Bitboard := Bit (From) xor Bit (To);
+      Col  : constant Color_Type := Pieces.Color (Piece);
+   begin
+      Position.Pieces (Piece) := Position.Pieces (Piece) xor Flip;
+      Position.All_Occ := Position.All_Occ xor Flip;
+      Position.Color_Occ (Col) := Position.Color_Occ (Col) xor Flip;
+      Position.Squares (To) := Piece;
+   end Move_Piece;
+
    --------------
    -- Piece_At --
    --------------

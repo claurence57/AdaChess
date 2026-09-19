@@ -37,8 +37,8 @@ project AdaChess_BB is
             for Switches ("ada") use
               ("-gnat2012", "-gnatp", "-gnatN", "-O3", "-gnatf",
                "-gnatep=../src_bb/prep.data", "-gnateDREL",
-               "-mpopcnt", "-mbmi", "-mbmi2");
-            for Switches ("c") use ("-O3", "-mpopcnt", "-mbmi", "-mbmi2");
+               "-mpopcnt", "-mbmi", "-mbmi2", "-flto");
+            for Switches ("c") use ("-O3", "-mpopcnt", "-mbmi", "-mbmi2", "-flto");
          when "debug" =>
             for Switches ("ada") use
               ("-gnat2012", "-gnata", "-g",

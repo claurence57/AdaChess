@@ -93,6 +93,14 @@ package BBChess.Board is
      (Position : in out Position_Type; Piece : in Piece_Type; Square : in Square_Type);
    -- Remove a piece from Square.
 
+   procedure Move_Piece
+     (Position : in out Position_Type; Piece : in Piece_Type;
+      From, To : in Square_Type);
+   -- Relocate Piece from From to To in one pass. To must be empty and
+   -- different from From, so the piece/occupancy/colour bitboards are each
+   -- toggled by (Bit (From) or Bit (To)) -- three XORs instead of a
+   -- Remove_Piece + Put_Piece pair (six and/or operations). Same result.
+
    function Lowest_Bit (Board : in Bitboard) return Square_Type;
    -- Index of the least significant set bit. Precondition: Board /= 0.
 
@@ -115,5 +123,6 @@ package BBChess.Board is
    pragma Inline (Clear_Lowest_Bit);
    pragma Inline (Put_Piece);
    pragma Inline (Remove_Piece);
+   pragma Inline (Move_Piece);
 
 end BBChess.Board;

@@ -43,6 +43,7 @@ package BBChess.Syzygy is
 
    function Enabled return Boolean;
    -- True when at least one tablebase is loaded.
+   pragma Inline (Enabled);
 
    function Probe_WDL (Position : in Position_Type) return Integer;
    -- Fathom WDL value (0..4) from the side to move's point of view, or -1 when

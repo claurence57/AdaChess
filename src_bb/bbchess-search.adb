@@ -571,6 +571,7 @@ package body BBChess.Search is
 
       return False;
    end Insufficient_Material;
+   pragma Inline (Insufficient_Material);
 
    ----------------
    -- Quiescence --
@@ -972,7 +973,6 @@ package body BBChess.Search is
       -- Move ordering, then PVS over the children.
       declare
          Ord : Order_Array;
-         Tac : Flag_Array;
          -- Occupancy of the side not to move, loop-invariant during the
          -- ordering pass; the per-move tactical test is then a single bit
          -- test against it (same predicate as Is_Tactical).
@@ -980,10 +980,9 @@ package body BBChess.Search is
            Color_Board (Position, Opposite (Position.Side));
       begin
          for J in 1 .. Count loop
-            Tac (J) := Moves (J).Flag in En_Passant | Promotion
-              or else (Enemy_Occ and Bit (Moves (J).To)) /= 0;
             Ord (J) := Order (Ctx, Position, Moves (J), Hash_Move, Ply,
-                              Tac (J));
+                              (Moves (J).Flag in En_Passant | Promotion
+                               or else (Enemy_Occ and Bit (Moves (J).To)) /= 0));
          end loop;
 
          for I in 1 .. Count loop
@@ -1000,12 +999,9 @@ package body BBChess.Search is
                if Best_J /= I then
                   declare
                      Tmp_M : constant Move_Type := Moves (I);
-                     Tmp_T : constant Boolean := Tac (I);
                   begin
                      Moves (I) := Moves (Best_J);
                      Moves (Best_J) := Tmp_M;
-                     Tac (I) := Tac (Best_J);
-                     Tac (Best_J) := Tmp_T;
                   end;
                   Ord (Best_J) := Ord (I);
                   Ord (I) := Best_O;
@@ -1015,7 +1011,12 @@ package body BBChess.Search is
             declare
                Undo    : Undo_Info;
                Score   : Score_Type;
-               Tactical : constant Boolean := Tac (I);
+               -- Same predicate the ordering pass uses; recomputed here so the
+               -- tactical flag is not carried through the sort in a third
+               -- array (only Moves and Ord need to be permuted).
+               Tactical : constant Boolean :=
+                 Moves (I).Flag in En_Passant | Promotion
+                 or else (Enemy_Occ and Bit (Moves (I).To)) /= 0;
                Reduction : Natural := 0;
                Move_Depth : Natural := Child_Depth;
             begin

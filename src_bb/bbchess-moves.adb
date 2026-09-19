@@ -103,8 +103,13 @@ package body BBChess.Moves is
                 Key             => Position.Key,
                 Material        => Position.Material);
 
-      -- Remove the moving piece from its origin square.
-      Remove_Piece (Position, Move.Piece, Move.From);
+      -- Remove the moving piece from its origin square, then (below) place it
+      -- on the destination. For a non-promotion move the two are fused after
+      -- the capture handling; a promotion changes the piece kind, so it keeps
+      -- the separate remove / put pair.
+      if Move.Flag = Promotion then
+         Remove_Piece (Position, Move.Piece, Move.From);
+      end if;
 
       -- Captures.
       if Move.Flag = En_Passant then
@@ -136,7 +141,11 @@ package body BBChess.Moves is
       end if;
 
       -- Place the moving (or promoted) piece on the destination.
-      Put_Piece (Position, To_Board, Move.To);
+      if Move.Flag = Promotion then
+         Put_Piece (Position, To_Board, Move.To);
+      else
+         Move_Piece (Position, Move.Piece, Move.From, Move.To);
+      end if;
 
       -- Castling also relocates the rook.
       if Move.Flag in King_Side_Castle | Queen_Side_Castle then
@@ -294,11 +303,16 @@ package body BBChess.Moves is
       To_Board : constant Piece_Type :=
         (if Move.Flag = Promotion then Move.Promotion else Move.Piece);
    begin
-      -- Remove the piece that stands on the destination square...
-      Remove_Piece (Position, To_Board, Move.To);
+      if Move.Flag = Promotion then
+         -- Remove the piece that stands on the destination square...
+         Remove_Piece (Position, To_Board, Move.To);
 
-      -- ... and put the moving piece back on its origin square.
-      Put_Piece (Position, Move.Piece, Move.From);
+         -- ... and put the moving piece back on its origin square.
+         Put_Piece (Position, Move.Piece, Move.From);
+      else
+         -- ... or move it straight back in one pass.
+         Move_Piece (Position, Move.Piece, Move.To, Move.From);
+      end if;
 
       -- Restore the captured piece, if any.
       if Undo.Has_Captured then
