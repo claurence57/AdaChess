@@ -150,8 +150,12 @@ jamais livre ni tablebases.
 
 En mode UCI, les mêmes fonctions sont exposées par `setoption` (`Hash`, `Threads`,
 `OwnBook`, `BookFile`, `SyzygyPath`) et par `go` (`wtime`, `btime`, `winc`,
-`binc`, `movetime`, `depth`). La recherche UCI est **synchrone** : `stop`
-n'interrompt pas un `go` en cours.
+`binc`, `movetime`, `depth`, `nodes`, `infinite`). La recherche UCI est
+**asynchrone** (Phase 5) : le `go` s'exécute dans une tâche, donc `isready`
+répond `readyok` pendant la recherche, `stop` l'interrompt (le coup courant est
+rendu immédiatement) et `quit` arrête la recherche puis sort. `go nodes N`
+s'arrête au plafond de nœuds et `go infinite` ne s'arrête que sur `stop` (ou
+`quit`). La recherche XBoard reste, elle, synchrone.
 
 ## Construction
 

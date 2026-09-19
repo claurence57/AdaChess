@@ -10,6 +10,19 @@
 > *Sisyphus* / OhMyOpenCode) et des **interfaces web**. Voir `DEVELOPMENT.md`
 > (note en tête et §11).
 
+### Outillage UCI — Phase 5 (asynchrone)
+
+- La recherche UCI s'exécute désormais dans une **tâche** : `go` rend la main
+  immédiatement. `isready` répond `readyok` pendant la recherche, `stop`
+  l'interrompt (le `bestmove` suit en < 1 ms) et `quit` arrête la recherche puis
+  sort sans blocage.
+- Nouveaux modes `go nodes N` (arrêt au plafond de nœuds, pollé dans la
+  récursion comme l'échéance) et `go infinite` (borné par `stop`). Aucun
+  changement de décision de recherche : `--bench 9/11` = 801 778 / 2 618 135
+  nœuds exacts, XBoard inchangé, `go depth 10` OLD vs NEW identique (bestmove et
+  nœuds). Mécanisme : seconde demande d'arrêt atomique `Abort_Request` et plafond
+  par contexte de recherche, plus un verrou console partagé pour les sorties.
+
 ### Recherche — Phase 0/1 (correctness + élagage)
 
 - **Phase 0 (correctness)** : re-recherche pleine de tout fail-high de la

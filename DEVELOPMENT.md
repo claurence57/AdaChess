@@ -1497,3 +1497,53 @@ les deux formes testées nuisent**. Le LMR de base (table log + re-recherche PVS
 est conservé tel quel. → **non retenu** (patch hors dépôt,
 `/tmp/opencode/adachess_bb_p3b`). Reste la modulation par l'**history**, non
 testée, mais que l'échec des deux autres formes rend peu prometteuse.
+
+---
+
+## 35. Phase 5 — outillage UCI asynchrone (`go nodes` / `go infinite` / `stop`)
+
+**Objectif** : rendre le protocole UCI utilisable comme outil (analyse
+interrompue, plafond de nœuds) **sans toucher à une seule décision de
+recherche**. Avant, `Handle_UCI_Go` appelait le `Best_Move` synchrone et
+bloquait la boucle de commandes : `stop`, `isready` et `quit` n'étaient servis
+qu'après le `bestmove`. `stop`/`ponderhit`/`debug`/`register` étaient même
+ignorés (`null`).
+
+**Mécanisme (réutilise l'interruption existante)** : la recherche temporisée
+était déjà interruptible — `Poll_Time` (tous les `Check_Interval = 1024` nœuds)
+lève `Search_Interrupted` sur `Stop_Search` (booléen `pragma Atomic`, posé par
+le thread SMP primaire). On ajoute :
+
+- une **seconde demande d'arrêt externe** `Abort_Request` (`Request_Stop` /
+  `Clear_Stop`, atomique), testée par le même `Poll_Time`. Elle est distincte de
+  `Stop_Search` (que le thread primaire remet à `False` entre deux recherches)
+  et n'est effacée qu'au démarrage de la recherche suivante ;
+- un **plafond de nœuds** `Node_Limit` **par contexte de recherche** (champ de
+  `Search_Context`, armé par le `Best_Move` à 4 arguments), pollé dans
+  `Poll_Time` : un `go nodes N` s'arrête à `N` nœuds à un intervalle de sondage
+  près. Le plafond est propagé aux threads Lazy SMP via `Root_Node_Cap` ;
+- un **verrou console** protégé (`Console` / `Locked_Put_Line`) partagé par les
+  rapports d'itération XBoard « post » et les lignes UCI (`readyok`,
+  `bestmove`) : `Ada.Text_IO` n'est pas réentrant et la recherche vit désormais
+  dans une tâche.
+
+**Côté boucle de commandes** : `Handle_UCI_Go` lance la recherche dans une
+**tâche** `UCI_Search_Task` (créée au premier `go`, pour ne pas activer de
+tâche en `--selftest`/`--bench`) via une entrée `Start` (position, profondeur,
+budget, plafond copiés), et rend la main immédiatement. `isready` répond
+`readyok` depuis la boucle principale, même recherche en cours ; `stop` arme
+`Abort_Request` ; `quit` (et la fin de stdin) arrête la recherche puis termine
+la tâche. Un `go` sur une recherche déjà en cours l'interrompt d'abord (les deux
+`bestmove` sont émis). `go infinite` n'est borné que par `stop` (profondeur
+64) et `go nodes`/`infinite` ne sondent pas le livre.
+
+**Non-régression vérifiée** : `--selftest` vert ; `--bench 9` = **801 778** et
+`--bench 11` = **2 618 135** nœuds (inchangés, ils n'utilisent pas l'UCI) ;
+XBoard inchangé (mêmes lignes d'itération, même `move`) ; `go depth 10` sur
+startpos **OLD vs NEW : `bestmove b1c3` et nœuds identiques** (20730 / 44349 /
+65383 / 109826 aux profondeurs 7→10). Tests de protocole : `go nodes 200000`
+s'arrête à 191 274 nœuds (profondeur 11 complétée), `go infinite` + `stop`
+rend le coup en **< 1 ms**, `isready` pendant la recherche répond `readyok`
+immédiatement, `quit` en pleine recherche sort en 15 ms (pas de blocage),
+y compris avec `--threads 4` et sur des cycles `go`/`stop` répétés. Patch hors
+dépôt : `/tmp/opencode/p5.patch`, binaire `/tmp/opencode/adachess_bb_p5`.

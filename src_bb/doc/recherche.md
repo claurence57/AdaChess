@@ -268,6 +268,14 @@ recherche ne remonte que depuis le dernier coup irréversible (`Position.Halfmov
 - L'arrêt passe par `Stop_Search`, un booléen `pragma Atomic` positionné par le
   thread primaire et testé par `Poll_Time`. Une barrière protégée `Completion`
   (`Done.Wait_All`) attend la fin de tous les threads.
+- `Abort_Request` (`Request_Stop` / `Clear_Stop`, Phase 5) est une **seconde**
+  demande d'arrêt, externe (UCI `stop`/`quit`) : elle est également testée par
+  `Poll_Time` et n'est effacée que par `Clear_Stop`, au démarrage d'une
+  recherche. Le `go nodes N` arme le champ `Node_Limit` du contexte de recherche,
+  aussi testé par `Poll_Time`, ce qui borne le dépassement à un intervalle de
+  sondage (`Check_Interval = 1024` nœuds). La sortie XBoard "post" et les lignes
+  UCI (`readyok`, `bestmove`) passent par le verrou protégé `Console`
+  (`Locked_Put_Line`), `Ada.Text_IO` n'étant pas sûr en concurrence de tâches.
 - Le résultat retenu est celui du thread ayant atteint la **plus grande
   profondeur**, départagé par le score ; à défaut, `Quick_Move`.
 
