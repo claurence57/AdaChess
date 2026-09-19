@@ -53,6 +53,12 @@ package body BBChess.Search is
    -- margin cannot reach alpha is not searched.
    Delta_Margin : constant Score_Type := 200;
 
+   -- Quiescence depth bound: a quiet (non-check) node at this many quiescence
+   -- plies stops expanding and returns the alpha-updated stand-pat score. An
+   -- in-check node keeps generating and searching evasions (so a mate is never
+   -- missed) and only its children are truncated.
+   Max_Q_Depth : constant := 8;
+
    ---------------
    -- TT helpers --
    ---------------
@@ -588,10 +594,16 @@ package body BBChess.Search is
    -- Quiescence --
    ----------------
 
+   -- The QDepth parameter counts quiescence plies below the root of this
+   -- quiescence call. At Max_Q_Depth the node is not expanded further: a quiet
+   -- node returns its alpha-updated stand-pat score, while an in-check node
+   -- scores its evasions statically (a static eval of an in-check position is
+   -- never returned, and a mate is still detected).
    function Quiescence (Ctx        : in Context_Access;
                         Position   : in out Position_Type;
                         Alpha, Beta : in Score_Type;
-                        Ply        : in Natural) return Score_Type
+                        Ply        : in Natural;
+                        QDepth     : in Natural) return Score_Type
    is
       A        : Score_Type := Alpha;
       B        : Score_Type := Beta;
@@ -602,6 +614,51 @@ package body BBChess.Search is
       Limit    : Natural;
    begin
       Poll_Time (Ctx);
+
+      -- Depth bound: stop expanding once the quiescence cap is reached.
+      if QDepth >= Max_Q_Depth then
+         if In_Check then
+            -- In check: every evasion is still tried, but each is scored
+            -- statically instead of recursing. This keeps the bound hard
+            -- without returning the static eval of an in-check position.
+            Generate_Legal_Moves (Position, Moves, Count);
+            if Count = 0 then
+               return -(Mate_Score - Ply);
+            end if;
+            declare
+               Best : Score_Type := -Infinity;
+            begin
+               for I in 1 .. Count loop
+                  declare
+                     Undo : Undo_Info;
+                  begin
+                     Make_Move (Position, Moves (I), Undo);
+                     declare
+                        S : constant Score_Type := -Evaluate (Position);
+                     begin
+                        Unmake_Move (Position, Moves (I), Undo);
+                        if S > Best then
+                           Best := S;
+                        end if;
+                     end;
+                  end;
+               end loop;
+               return Best;
+            end;
+         else
+            -- Not in check: the alpha-updated stand-pat score is the safe
+            -- truncation (exactly the score the unbounded search would use
+            -- as its floor before trying more captures).
+            Stand := Evaluate (Position);
+            if Stand >= B then
+               return Stand;
+            end if;
+            if Stand > A then
+               A := Stand;
+            end if;
+            return A;
+         end if;
+      end if;
 
       -- Stand pat is only legal when not in check: a side that is in check
       -- must play an evasion, so the static evaluation cannot be returned.
@@ -711,7 +768,8 @@ package body BBChess.Search is
                   Score : Score_Type;
                begin
                   Make_Move (Position, Moves (I), Undo);
-                  Score := -Quiescence (Ctx, Position, -B, -A, Ply + 1);
+                  Score := -Quiescence (Ctx, Position, -B, -A, Ply + 1,
+                                        QDepth + 1);
                   Unmake_Move (Position, Moves (I), Undo);
 
                   if Score >= B then
@@ -804,7 +862,7 @@ package body BBChess.Search is
       end if;
 
       if Depth = 0 then
-         return Quiescence (Ctx, Position, A, B, Ply);
+         return Quiescence (Ctx, Position, A, B, Ply, 0);
       end if;
 
       -- Prefetch the transposition-table bucket now, so its cache miss is
@@ -921,7 +979,7 @@ package body BBChess.Search is
         and then Eval_Now + Razor_Margin * Score_Type (Depth) < Alpha
       then
          declare
-            Q : constant Score_Type := Quiescence (Ctx, Position, A, B, Ply);
+            Q : constant Score_Type := Quiescence (Ctx, Position, A, B, Ply, 0);
          begin
             if Q < Alpha then
                return Q;
