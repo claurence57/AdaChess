@@ -59,14 +59,24 @@ package body BBChess.Search is
 
    type Bound_Type is (Exact, Lower_Bound, Upper_Bound);
 
+   --  Depth only ever holds 0 .. Max_Ply (128) on store and -1 as the empty
+   --  marker, so it is carried in 16 bits. The field order groups the wide
+   --  members first, so the record packs to 24 bytes (8 key + 4 move + 4 score
+   --  + 4 age + 1 bound + 2 depth + 1 padding) instead of 32. Field values,
+   --  entry acceptance and the replacement policy are unchanged, so the
+   --  search tree is bit-identical; the 32 MB table becomes 24 MB, closer to
+   --  the 8 MB L3.
+   type TT_Depth_Type is range -1 .. 32_767;
+   for TT_Depth_Type'Size use 16;
+
    type TT_Entry is
       record
          Hash_Key : Bitboard := 0;
-         Depth    : Integer := -1;
-         Bound    : Bound_Type := Exact;
-         Score    : Score_Type := 0;
          Move     : Packed_Move := 0;
+         Score    : Score_Type := 0;
          Age      : Natural := 0;
+         Bound    : Bound_Type := Exact;
+         Depth    : TT_Depth_Type := -1;
       end record;
 
    TT_Size   : constant := 1_048_576;
@@ -167,14 +177,15 @@ package body BBChess.Search is
       begin
          Repl := Old.Depth < 0
            or else Old.Hash_Key = Position.Key
-           or else Depth >= Old.Depth
+           or else TT_Depth_Type (Depth) >= Old.Depth
            or else Old.Age < TT_Generation;
       end;
 
       if Repl then
          Transposition_Table (Slot) :=
-           (Hash_Key => Position.Key, Depth => Depth, Bound => Bound,
-            Score => Saved, Move => Packed, Age => TT_Generation);
+           (Hash_Key => Position.Key, Depth => TT_Depth_Type (Depth),
+            Bound => Bound, Score => Saved, Move => Packed,
+            Age => TT_Generation);
       end if;
    end Store;
 
@@ -782,7 +793,7 @@ package body BBChess.Search is
       Have_Eval   : Boolean := False;
       TT_Score    : Score_Type := 0;
       TT_Bound    : Bound_Type := Exact;
-      TT_Depth    : Integer := -1;
+      TT_Depth    : TT_Depth_Type := -1;
       Have_TT     : Boolean := False;
    begin
       Poll_Time (Ctx);
@@ -872,7 +883,7 @@ package body BBChess.Search is
             TT_Bound := E.Bound;
             TT_Depth := E.Depth;
             Have_TT  := True;
-            if E.Depth >= Depth then
+            if E.Depth >= TT_Depth_Type (Depth) then
                case E.Bound is
                   when Exact =>
                      return TT_Score;
