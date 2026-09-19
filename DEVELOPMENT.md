@@ -1409,10 +1409,17 @@ moteur actuel (opt1+opt2+opt3) et la **baseline d'avant toute optimisation** :
 VERDICT PASS (H1 accepté)**. L'arbre reste **bit-identique**
 (801 778 / 2 618 135 nœuds) : le gain est **purement** dû à la vitesse.
 
+**Re-mesure après la 4ᵉ passe** (§33, opt1+2+3+4, `--bench 9` 0,561 → 0,264 s,
+**×2,12**), même protocole : SPRT 300 : NEW 144-42-114 (**67,0 %**),
+**+123,0 ± 31,6 Elo, LOS 100 % → plafond, positif massif**. La différence avec
+les +170 précédents est l'**intervalle de confiance** (±32 vs ±37) : les deux
+mesures sont compatibles, le gain cumulé réel se situe vers **+140 ± 35 Elo**
+(les deux runs partagent la même graine/livre, d'où une variance corrélée).
+
 Conclusion : sur ce moteur, le **seul levier de force démontré** est
-l'optimisation CPU (≈ ×2 vitesse ⇒ ≈ +170 Elo) ; le tuning de l'évaluation
-(Texel, SPSA, §20-21) est resté **neutre/négatif**. Priorité future : continuer
-le profilage et l'optimisation.
+l'optimisation CPU (≈ ×2 vitesse ⇒ ≈ +110 à +170 Elo) ; le tuning de
+l'évaluation (Texel, SPSA, §20-21) est resté **neutre/négatif**. Priorité future :
+continuer le profilage et l'optimisation.
 
 ---
 
