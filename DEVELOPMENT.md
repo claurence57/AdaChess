@@ -1554,3 +1554,58 @@ rend le coup en **< 1 ms**, `isready` pendant la recherche répond `readyok`
 immédiatement, `quit` en pleine recherche sort en 15 ms (pas de blocage),
 y compris avec `--threads 4` et sur des cycles `go`/`stop` répétés. Patch hors
 dépôt : `/tmp/opencode/p5.patch`, binaire `/tmp/opencode/adachess_bb_p5`.
+
+---
+
+## 36. Optimisation CPU #5 (arbre identique) — adoptée sur critère objectif
+
+Cinquième passe de profilage/optimisation `perf` (bench 11/12), toujours **sans
+changement de comportement** (`--bench 9/11` = **801 778 / 2 618 135** nœuds
+exacts, `--selftest` vert, perft 1→5 et `Static` inchangés, `--portable` vert).
+
+**Profil de départ** (self-%, cycles, bench 11) : `Negamax` ~37 %,
+`Positional_Score` ~21 %, `Generate_Legal_Common` ~16 %, `Make_Move` ~5 %,
+`SEE.Exchange` ~4 %, `Quiescence` ~4 %, `King_Safety` ~3 %. Instructions de
+référence : **6 787 908 425** (bench 11), cycles 3 262 M.
+
+Changements retenus (éval **byte-identique** sur 41 positions diag + 10 000
+positions aléatoires, bestmoves identiques à profondeur 8 sur 40 positions et 10
+sur un sous-ensemble) :
+
+- **`Negamax` — tableau `Tac` supprimé (gain principal)** : le drapeau
+  « tactique » de chaque coup était recopié dans un troisième tableau à travers
+  le tri par sélection, alors qu'il n'est lu qu'à la position finale `I`. Il est
+  désormais **recalculé après le tri** (même prédicat : flag ep/promotion ou
+  `Enemy_Occ` sur la case d'arrivée), et seuls `Moves` et `Ord` sont permutés :
+  une écriture mémoire en moins par coup et par échange.
+- **`Make_Move`/`Unmake_Move` — `Move_Piece` fusionné** : pour un déplacement
+  non-promotion, `Remove_Piece` + `Put_Piece` (six and/or sur les bitboards
+  pièce/occupation/couleur) devient un seul passage en trois XOR
+  (`Bit (From) xor Bit (To)`). Les promotions gardent l'ancien remove/put
+  (le type de pièce change).
+- **LTO** : `-flto` activé en `release` (Ada et C) ; `Insufficient_Material` et
+  `Syzygy.Enabled` (appelés à chaque nœud) inlinés.
+
+**Mesure** (A/B cycles+instructions entrelacé, min de 21 répétitions, bench 11) :
+
+| | avant (opt4) | après (opt5) | facteur |
+|---|---|---|---|
+| instructions bench 11 | 6,778 G | 6,567 G | **−3,1 %** |
+| cycles bench 11 | 3,224 G | 3,098 G | **−3,9 %** |
+| `--bench 9` (min) | 0,230 s | 0,218 s | **×1,05** |
+
+**Candidats rejetés après mesure** (plus lents ou neutres) : `-march=native`,
+`-mtune=native`, `-Ofast`, `-funroll-loops`, `-fomit-frame-pointer`, PGO,
+`Move_Type` compacté (bit-packé ou aligné octet), historique 16 bits, TT scindé
+clé/données, TT padding 32 octets / bucket aligné sur ligne de cache, accumu-
+lation de mobilité par type, `Piece_At` remplacé par la carte `Squares` dans les
+menaces, `Store` avec chargement unique du bucket, prefetch côté parent, tri
+d'insertion stable (le tri par sélection **n'est pas stable** : l'ordre des
+ex-æquo change, donc l'arbre change — vérifié, `--bench 9` passe à 662 777).
+
+**SPRT 300 à 1+0,1 vs opt4 : NEW 86-84-130 (50,3 %), +2,3 ± 29,6 Elo,
+LOS 56,1 % → neutre** (attendu : ×1,04 de vitesse ⇒ ~+4 Elo, sous le pouvoir
+de résolution de 300 parties). Adoptée sur le même critère **objectif** que
+opt1-opt4 : **arbre bit-identique**, éval byte-identique, self-test/portable
+verts, plus rapide. Patch hors dépôt : `/tmp/opencode/opt5.patch`, binaire
+`/tmp/opencode/adachess_bb_opt5`.

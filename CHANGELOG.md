@@ -285,6 +285,24 @@ passes (bench 9 0,561 → 0,264 s, ×2,12) : **NEW 144-42-114 (67,0 %),
 +123,0 ± 31,6 Elo, LOS 100 %** — compatible avec les +170, cumul réel vers
 **+140 ± 35 Elo**. Voir `DEVELOPMENT.md` §32-33.
 
+### Performance — optimisation CPU #5 (arbre identique)
+
+- **`Negamax` — tableau `Tac` supprimé** : le drapeau « tactique » n'est plus
+  transporté dans un troisième tableau à travers le tri par sélection ; il est
+  recalculé après le tri (même prédicat), de sorte que seuls `Moves` et `Ord`
+  sont permutés. C'est le gain principal.
+- **`Make_Move`/`Unmake_Move` — `Move_Piece` fusionné** : le déplacement d'une
+  pièce non-promotion se fait en trois XOR (`Bit (From) xor Bit (To)`) au lieu
+  d'un `Remove_Piece` + `Put_Piece` (six and/or).
+- **LTO** (`-flto`) activé en `release` (Ada et C) ; `Insufficient_Material` et
+  `Syzygy.Enabled` inlinés (appelés à chaque nœud).
+- `--bench 11` **−3,1 % d'instructions** (6,79 → 6,58 G), A/B entrelacé
+  **−3,9 % de cycles** (min de 21 répétitions) ; `--bench 9/11` = **801 778 /
+  2 618 135** nœuds exacts, éval byte-identique (41 diag + 10 000 aléatoires),
+  perft 1→5 et `Static` inchangés, bestmoves identiques profondeur 8 (40) et
+  10 (sous-ensemble), `--selftest` et `portable` verts. Voir `DEVELOPMENT.md`
+  §36.
+
 ### Recherche — modulation du LMR par `improving` (rejetée)
 
 Flag `improving` (éval à 2 plis, même camp) modulant le LMR : arbre réduit
