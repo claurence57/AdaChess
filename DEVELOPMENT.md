@@ -1609,3 +1609,35 @@ de résolution de 300 parties). Adoptée sur le même critère **objectif** que
 opt1-opt4 : **arbre bit-identique**, éval byte-identique, self-test/portable
 verts, plus rapide. Patch hors dépôt : `/tmp/opencode/opt5.patch`, binaire
 `/tmp/opencode/adachess_bb_opt5`.
+
+---
+
+## 37. Optimisation CPU #6 (TT 24 octets) — adoptée
+
+Sixième passe. Axe **nouveau** : la **taille** de l'entrée de table de
+transposition, seul levier restant après l'épuisement des changements de code.
+L'entrée passe de **32 à 24 octets** : le champ `Depth` (borné à `-1 ..
+Max_Ply`, soit 0..128, plus le marqueur vide -1) est porté en **16 bits**
+(`TT_Depth_Type`, `'Size use 16`) et les membres larges sont regroupés en tête
+(8 clé + 4 coup + 4 score + 4 âge + 1 borne + 2 profondeur + 1 bourrage). La
+table passe de **32 à 24 Mo**, plus proche des **8 Mo de L3**.
+
+Les **valeurs**, la **condition d'acceptation** et la **politique de
+remplacement** sont inchangées (seules deux comparaisons sont converties) : à
+profondeur fixe l'arbre reste **bit-identique** (`--bench 9/11` = 801 778 /
+2 618 135 nœuds, `--selftest` vert, perft 1→5 et `Static` inchangés, éval
+byte-identique sur 40 diag + 12 000 fuzz, bestmoves identiques d8/d10,
+`portable` vert).
+
+**Mesure** (A/B entrelacé, min de 31 répétitions, bench 11) : cycles
+**3 140 M → 3 067 M (−2,3 %, ×1,024)**, médiane −2,2 %, **instructions
+−0,1 %** → le gain est **purement** sur le chemin mémoire/cache (moins de
+cache-misses), pas sur le nombre d'opérations. `--bench 9` cycles −2,0 %.
+
+**SPRT 300 à 1+0,1 vs opt5 : NEW 80-73-147 (51,2 %), +8,1 ± 28,1 Elo,
+LOS 71,4 % → positif (non significatif).** Adoptée sur le même critère objectif
+que opt1-opt5. Patch hors dépôt : `/tmp/opencode/opt6.patch`, binaire
+`/tmp/opencode/adachess_bb_opt6`. Piste restante identifiée mais **écartée** :
+un TT « scindé clé/données » ou un layout par buckets qui changerait les entrées
+acceptées (interdit sans changer l'arbre) ; le stall mémoire dans `Negamax`
+(~35 %) est désormais **considéré épuisé** côté micro-optimisations sûres.

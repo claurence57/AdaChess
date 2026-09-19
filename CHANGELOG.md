@@ -303,6 +303,18 @@ passes (bench 9 0,561 → 0,264 s, ×2,12) : **NEW 144-42-114 (67,0 %),
   10 (sous-ensemble), `--selftest` et `portable` verts. Voir `DEVELOPMENT.md`
   §36.
 
+### Performance — optimisation CPU #6 (TT 24 octets, arbre identique)
+
+- **Entrée de table de transposition 32 → 24 octets** : `Depth` porté en 16 bits
+  (`TT_Depth_Type`, borné à `Max_Ply`) et membres larges regroupés → table
+  32 → 24 Mo, plus proche du L3. Valeurs, condition d'acceptation et politique
+  de remplacement **inchangées** → arbre bit-identique.
+- A/B entrelacé bench 11 (min de 31 répétitions) : **cycles −2,3 %** (×1,024),
+  **instructions −0,1 %** → gain **purement mémoire/cache**. `--bench 9/11` =
+  801 778 / 2 618 135 nœuds exacts, éval byte-identique (40 diag + 12 000
+  aléatoires), bestmoves identiques d8/d10, `--selftest`/`portable` verts.
+  SPRT vs opt5 : **+8,1 ± 28,1 Elo, LOS 71 %**. Voir `DEVELOPMENT.md` §37.
+
 ### Recherche — modulation du LMR par `improving` (rejetée)
 
 Flag `improving` (éval à 2 plis, même camp) modulant le LMR : arbre réduit
