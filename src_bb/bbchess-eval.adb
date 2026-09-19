@@ -65,38 +65,6 @@ package body BBChess.Eval is
        7 => Bit (7)  or Bit (15) or Bit (23) or Bit (31)
              or Bit (39) or Bit (47) or Bit (55) or Bit (63));
 
-   -- Neighbour files of each file (file-1 | file+1), precomputed so the
-   -- isolated-pawn test needs no per-file branch.
-   Neighbor_Files : constant File_Mask_Table :=
-     (0 => Bit (1)  or Bit (9)  or Bit (17) or Bit (25)
-             or Bit (33) or Bit (41) or Bit (49) or Bit (57),
-      1 => Bit (0)  or Bit (8)  or Bit (16) or Bit (24)
-             or Bit (32) or Bit (40) or Bit (48) or Bit (56)
-          or Bit (2)  or Bit (10) or Bit (18) or Bit (26)
-             or Bit (34) or Bit (42) or Bit (50) or Bit (58),
-      2 => Bit (1)  or Bit (9)  or Bit (17) or Bit (25)
-             or Bit (33) or Bit (41) or Bit (49) or Bit (57)
-          or Bit (3)  or Bit (11) or Bit (19) or Bit (27)
-             or Bit (35) or Bit (43) or Bit (51) or Bit (59),
-      3 => Bit (2)  or Bit (10) or Bit (18) or Bit (26)
-             or Bit (34) or Bit (42) or Bit (50) or Bit (58)
-          or Bit (4)  or Bit (12) or Bit (20) or Bit (28)
-             or Bit (36) or Bit (44) or Bit (52) or Bit (60),
-      4 => Bit (3)  or Bit (11) or Bit (19) or Bit (27)
-             or Bit (35) or Bit (43) or Bit (51) or Bit (59)
-          or Bit (5)  or Bit (13) or Bit (21) or Bit (29)
-             or Bit (37) or Bit (45) or Bit (53) or Bit (61),
-      5 => Bit (4)  or Bit (12) or Bit (20) or Bit (28)
-             or Bit (36) or Bit (44) or Bit (52) or Bit (60)
-          or Bit (6)  or Bit (14) or Bit (22) or Bit (30)
-             or Bit (38) or Bit (46) or Bit (54) or Bit (62),
-      6 => Bit (5)  or Bit (13) or Bit (21) or Bit (29)
-             or Bit (37) or Bit (45) or Bit (53) or Bit (61)
-          or Bit (7)  or Bit (15) or Bit (23) or Bit (31)
-             or Bit (39) or Bit (47) or Bit (55) or Bit (63),
-       7 => Bit (6)  or Bit (14) or Bit (22) or Bit (30)
-              or Bit (38) or Bit (46) or Bit (54) or Bit (62));
-
    -- One-bit-per-square mask of every rank (0 = rank 1 / a1..h1).
    type Rank_Mask_Table is array (Natural range 0 .. 7) of Bitboard;
    Rank_Mask : constant Rank_Mask_Table :=
@@ -116,6 +84,22 @@ package body BBChess.Eval is
             or Bit (52) or Bit (53) or Bit (54) or Bit (55),
       7 => Bit (56) or Bit (57) or Bit (58) or Bit (59)
             or Bit (60) or Bit (61) or Bit (62) or Bit (63));
+
+   --  Squares on a given "own row" (see the PST row convention), used by the
+   --  king-safety pawn shield: own rows 1..3 correspond to rank 1..3 for
+   --  White and rank 6..4 for Black. Home_Row_Mask is own row 0 (a pawn on
+   --  the back rank is the frontmost and suppresses any shield bonus).
+   Shield_Row_Mask : constant array (Color_Type, 1 .. 3) of Bitboard :=
+     (White => (Rank_Mask (1), Rank_Mask (2), Rank_Mask (3)),
+      Black => (Rank_Mask (6), Rank_Mask (5), Rank_Mask (4)));
+   Home_Row_Mask : constant array (Color_Type) of Bitboard :=
+     (White => Rank_Mask (0), Black => Rank_Mask (7));
+
+   --  Squares on own rows 3..5 (the zone from which an enemy pawn "storms"
+   --  the king's wing).
+   Storm_Mask : constant array (Color_Type) of Bitboard :=
+     (White => Rank_Mask (3) or Rank_Mask (4) or Rank_Mask (5),
+      Black => Rank_Mask (2) or Rank_Mask (3) or Rank_Mask (4));
 
    -- Pure-bitboard helpers: shifts by one file / one rank. Board layout:
    -- square = Rank*8 + File, so +1 file = bit index +1, +1 rank = +8.
@@ -137,20 +121,23 @@ package body BBChess.Eval is
    function Front_Blockers (Enemy   : in Bitboard;
                             Color   : in Color_Type) return Bitboard is
       Wide : Bitboard := Enemy or East_1 (Enemy) or West_1 (Enemy);
-      Res  : Bitboard := 0;
    begin
+      -- Union of the shifted copies of Wide over 1 .. 7 ranks, built by a
+      -- logarithmic (Kogge-Stone) fill instead of seven sequential shifts:
+      -- the doubling shifts 1, 2, 4 ranks cover every distance up to 7, and
+      -- the final one-rank shift drops the unshifted copy. The OR of shifted
+      -- sets is exact, so the result equals the former loop's.
       if Color = White then
-         for Step in 1 .. 7 loop
-            Wide := South_1 (Wide);
-            Res := Res or Wide;
-         end loop;
+         Wide := Wide or South_1 (Wide);
+         Wide := Wide or (Wide / 65536);
+         Wide := Wide or (Wide / 4294967296);
+         return South_1 (Wide);
       else
-         for Step in 1 .. 7 loop
-            Wide := North_1 (Wide);
-            Res := Res or Wide;
-         end loop;
+         Wide := Wide or North_1 (Wide);
+         Wide := Wide or (Wide * 65536);
+         Wide := Wide or (Wide * 4294967296);
+         return North_1 (Wide);
       end if;
-      return Res;
    end Front_Blockers;
 
    -- Pawns of Color that are passed: no enemy pawn on the same or adjacent
@@ -615,7 +602,6 @@ package body BBChess.Eval is
       King_File : constant Natural := File_Of (King_Sq);
       Result    : Score_Type := 0;
       Lo, Hi   : Integer;
-      B        : Bitboard;
    begin
       -- The danger is applied non-linearly (a coordinated attack by several
       -- pieces is much worse than the sum of the attackers).
@@ -644,57 +630,52 @@ package body BBChess.Eval is
 
       if Lo <= Hi then
          declare
-            Has_Pawn  : array (0 .. 7) of Boolean := (others => False);
-            Front_Row : array (0 .. 7) of Natural := (others => 9);
             -- Only the king's wing files are inspected below, so the pawn
             -- scans can be restricted to those files (same result).
             Wing : constant Bitboard :=
               (if Lo = 0
                then File_Mask (0) or File_Mask (1) or File_Mask (2)
                else File_Mask (5) or File_Mask (6) or File_Mask (7));
+            Own_Wing : constant Bitboard :=
+              Position.Pieces (Make (Color, Pawn)) and Wing;
          begin
-            B := Position.Pieces (Make (Color, Pawn)) and Wing;
-            while B /= 0 loop
+            -- Pawn shield per wing file: the frontmost pawn's own row (the
+            -- minimum over the file) decides the bonus. Rows 1..3 are tested
+            -- from the front; a pawn on own row 0 suppresses the bonus and
+            -- rows 4..7 earn none, matching the former minimum scan. A file
+            -- without any own pawn is open.
+            for F in Lo .. Hi loop
                declare
-                  S : constant Square_Type := Lowest_Bit (B);
-                  F : constant Natural := File_Of (S);
-                  R : constant Natural := Own_Row (Color, S);
+                  Pf : constant Bitboard := Own_Wing and File_Mask (F);
                begin
-                  Has_Pawn (F) := True;
-                  if R < Front_Row (F) then
-                     Front_Row (F) := R;
+                  if Pf = 0 then
+                     Result := Result - Open_File_Near_King;
+                  elsif (Pf and Home_Row_Mask (Color)) = 0 then
+                     if (Pf and Shield_Row_Mask (Color, 1)) /= 0 then
+                        Result := Result + Pawn_Shield_Row1;
+                     elsif (Pf and Shield_Row_Mask (Color, 2)) /= 0 then
+                        Result := Result + Pawn_Shield_Row2;
+                     elsif (Pf and Shield_Row_Mask (Color, 3)) /= 0 then
+                        Result := Result + Pawn_Shield_Row3;
+                     end if;
                   end if;
                end;
-               B := B and (B - 1);
-            end loop;
-
-            for F in Lo .. Hi loop
-               if Has_Pawn (F) then
-                  case Front_Row (F) is
-                     when 1 => Result := Result + Pawn_Shield_Row1;
-                     when 2 => Result := Result + Pawn_Shield_Row2;
-                     when 3 => Result := Result + Pawn_Shield_Row3;
-                     when others => null;
-                  end case;
-               else
-                  Result := Result - Open_File_Near_King;
-               end if;
             end loop;
 
             -- Advanced enemy pawns storming the wing. Every square of Wing
             -- lies in the king's file range, so only the rank test remains.
-            B := Position.Pieces (Make (Enemy, Pawn)) and Wing;
-            while B /= 0 loop
-               declare
-                  S : constant Square_Type := Lowest_Bit (B);
-                  R : constant Natural := Own_Row (Color, S);
-               begin
-                  if R in 3 .. 5 then
-                     Result := Result - Pawn_Storm;
-                  end if;
-               end;
-               B := B and (B - 1);
-            end loop;
+            -- Each storming pawn subtracts Pawn_Storm, which is a plain
+            -- popcount of the enemy pawns on the wing's storm rows.
+            declare
+               Stormers : constant Natural :=
+                 Popcount (Position.Pieces (Make (Enemy, Pawn))
+                           and Wing and Storm_Mask (Color));
+            begin
+               if Stormers /= 0 then
+                  Result := Result
+                    - Pawn_Storm * Score_Type (Stormers);
+               end if;
+            end;
          end;
       end if;
 
@@ -867,32 +848,56 @@ package body BBChess.Eval is
       declare
          Passed : constant Bitboard := Passed_Pawns (Position, Color);
          PB     : Bitboard;
+         -- Per-file presence collapse: OR the eight ranks of each file into
+         -- the low byte (square = Rank*8+File, so a right shift by 8*k brings
+         -- rank r to r-k). Bit f is set iff the file holds at least one own
+         -- pawn. This replaces the former eight per-file popcounts.
+         Files_Byte : Bitboard;
+         Num_Files  : Natural;
+         Iso_Files  : Bitboard;
+         Iso_Mask   : Bitboard;
       begin
-         -- Doubled penalty and isolation, driven by per-file counts.
-         for F in 0 .. 7 loop
-            declare
-               Cnt : constant Natural :=
-                 Popcount (Own_Pawns and File_Mask (F));
-            begin
-               if Cnt >= 2 then
-                  Result := Result +
-                    (Opening => (-Doubled_Pawn_Opening)
-                       * Score_Type (Cnt - 1),
-                     End_Game => (-Doubled_Pawn_Endgame)
-                       * Score_Type (Cnt - 1));
-               end if;
+         Files_Byte := Own_Pawns or (Own_Pawns / 256);
+         Files_Byte := Files_Byte or (Files_Byte / 65536);
+         Files_Byte := Files_Byte or (Files_Byte / 4294967296);
+         Files_Byte := Files_Byte and 16#FF#;
+         Num_Files := Popcount (Files_Byte);
 
-               if Cnt >= 1 then
-                  if (Own_Pawns and Neighbor_Files (F)) = 0 then
-                     Result := Result +
-                       (Opening => (-Isolated_Pawn_Opening)
-                          * Score_Type (Cnt),
-                        End_Game => (-Isolated_Pawn_Endgame)
-                          * Score_Type (Cnt));
-                  end if;
+         -- Doubled penalty: sum over files of max (Cnt - 1, 0) is the total
+         -- pawn count minus the number of occupied files (linear in Cnt, so
+         -- hoisting it out of the eight-file loop is exact).
+         declare
+            Doubled : constant Natural := Popcount (Own_Pawns) - Num_Files;
+         begin
+            if Doubled /= 0 then
+               Result := Result +
+                 (Opening => (-Doubled_Pawn_Opening) * Score_Type (Doubled),
+                  End_Game => (-Doubled_Pawn_Endgame) * Score_Type (Doubled));
+            end if;
+         end;
+
+         -- Isolated pawns: files whose own pawns have no neighbour-file pawn.
+         -- Shifting the presence byte produces the neighbour mask; expanding
+         -- each isolated file bit to its full column then counts them with a
+         -- single popcount (the multiplication cannot carry: the set bits of
+         -- the constant and the byte value occupy distinct file positions).
+         Iso_Files := Files_Byte
+           and not (Files_Byte * 2 or Files_Byte / 2) and 16#FF#;
+         if Iso_Files /= 0 then
+            Iso_Mask := Iso_Files * 16#0101010101010101#;
+            declare
+               Isolated : constant Natural :=
+                 Popcount (Own_Pawns and Iso_Mask);
+            begin
+               if Isolated /= 0 then
+                  Result := Result +
+                    (Opening => (-Isolated_Pawn_Opening)
+                       * Score_Type (Isolated),
+                     End_Game => (-Isolated_Pawn_Endgame)
+                       * Score_Type (Isolated));
                end if;
             end;
-         end loop;
+         end if;
 
          -- Passed pawns: iterate the front-span bitboard for the row bonus.
          PB := Passed;

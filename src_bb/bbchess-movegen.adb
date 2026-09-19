@@ -175,6 +175,11 @@ package body BBChess.Movegen is
       Rook_Piece   : constant Piece_Type := Make (Side, Rook);
       Queen_Piece  : constant Piece_Type := Make (Side, Queen);
       King_Piece   : constant Piece_Type := Make (Side, King);
+      -- Legal targets of a leaper/slider: in tactical mode only enemy squares
+      -- are kept, otherwise all non-own squares. The mask is loop-invariant,
+      -- so it is built once instead of re-testing Tactical per piece.
+      Target_Mask  : constant Bitboard :=
+        (if Tactical then Enemy else not Own);
 
       function Board_Of (Kind : in Kind_Type) return Bitboard is
         (Position.Pieces (Make (Side, Kind)));
@@ -290,11 +295,8 @@ package body BBChess.Movegen is
       while Pieces /= 0 loop
          From := Lowest_Bit (Pieces);
          declare
-            Targets : Bitboard := Knight_Attacks (From) and not Own;
+            Targets : Bitboard := Knight_Attacks (From) and Target_Mask;
 begin
-             if Tactical then
-                Targets := Targets and Enemy;
-             end if;
             while Targets /= 0 loop
                Add (Moves, Count, From, Lowest_Bit (Targets), Knight_Piece);
                Targets := Targets and (Targets - 1);
@@ -308,11 +310,8 @@ begin
       while Pieces /= 0 loop
          From := Lowest_Bit (Pieces);
          declare
-            Targets : Bitboard := Bishop_Attacks (From, Occ) and not Own;
+            Targets : Bitboard := Bishop_Attacks (From, Occ) and Target_Mask;
 begin
-             if Tactical then
-                Targets := Targets and Enemy;
-             end if;
             while Targets /= 0 loop
                Add (Moves, Count, From, Lowest_Bit (Targets), Bishop_Piece);
                Targets := Targets and (Targets - 1);
@@ -326,11 +325,8 @@ begin
       while Pieces /= 0 loop
          From := Lowest_Bit (Pieces);
          declare
-            Targets : Bitboard := Rook_Attacks (From, Occ) and not Own;
+            Targets : Bitboard := Rook_Attacks (From, Occ) and Target_Mask;
 begin
-             if Tactical then
-                Targets := Targets and Enemy;
-             end if;
             while Targets /= 0 loop
                Add (Moves, Count, From, Lowest_Bit (Targets), Rook_Piece);
                Targets := Targets and (Targets - 1);
@@ -344,11 +340,8 @@ begin
       while Pieces /= 0 loop
          From := Lowest_Bit (Pieces);
          declare
-            Targets : Bitboard := Queen_Attacks (From, Occ) and not Own;
+            Targets : Bitboard := Queen_Attacks (From, Occ) and Target_Mask;
 begin
-             if Tactical then
-                Targets := Targets and Enemy;
-             end if;
             while Targets /= 0 loop
                Add (Moves, Count, From, Lowest_Bit (Targets), Queen_Piece);
                Targets := Targets and (Targets - 1);
@@ -363,11 +356,8 @@ begin
       King_First := Count + 1;
       From := Lowest_Bit (Position.Pieces (King_Piece));
       declare
-         Targets : Bitboard := King_Attacks (From) and not Own;
+         Targets : Bitboard := King_Attacks (From) and Target_Mask;
 begin
-             if Tactical then
-                Targets := Targets and Enemy;
-             end if;
          while Targets /= 0 loop
             Add (Moves, Count, From, Lowest_Bit (Targets), King_Piece);
             Targets := Targets and (Targets - 1);

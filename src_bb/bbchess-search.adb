@@ -21,6 +21,8 @@ with Ada.Text_IO;
 
 with Ada.Numerics.Elementary_Functions;
 
+with System;
+
 with BBChess.Hash;
 use BBChess.Hash;
 
@@ -82,6 +84,13 @@ package body BBChess.Search is
    function TT_Bucket (Position : in Position_Type) return Natural is
      (Natural (Position.Key and Bitboard (TT_Mask - 1)));
    pragma Inline (TT_Bucket);
+
+   --  Software prefetch of a TT slot, issued at node entry so the probe's
+   --  cache miss overlaps with the prologue (draw / repetition / mate checks).
+   --  A pure hint: it has no architectural effect and cannot change the search.
+   procedure Prefetch_TT (P : in System.Address)
+     with Import, Convention => Intrinsic, External_Name => "__builtin_prefetch";
+   pragma Inline (Prefetch_TT);
 
    function Adjust_Score (S : Score_Type; Ply : Natural) return Score_Type is
    begin
@@ -568,23 +577,33 @@ package body BBChess.Search is
       -- Move the tactical moves (captures / promotions) to the front, then
       -- order them by MVV so the most promising captures are tried first.
       -- The victim value is computed once per tactical move (and carried
-      -- through the selection swaps) instead of once per comparison.
+      -- through the selection swaps) instead of once per comparison. In a
+      -- quiet position the generator already yields only tactical moves, so
+      -- the partition (and its per-move Is_Tactical test) is skipped; the
+      -- selection sort below then sees the same T = Count prefix.
       declare
          T : Natural := 0;
          Vic : Order_Array;
       begin
-         for I in 1 .. Count loop
-            if Is_Tactical (Position, Moves (I)) then
-               T := T + 1;
-               Vic (T) := Kind_Value (Captured_Kind (Position, Moves (I)));
-               declare
-                  Tmp : constant Move_Type := Moves (T);
-               begin
-                  Moves (T) := Moves (I);
-                  Moves (I) := Tmp;
-               end;
-            end if;
-         end loop;
+         if In_Check then
+            for I in 1 .. Count loop
+               if Is_Tactical (Position, Moves (I)) then
+                  T := T + 1;
+                  Vic (T) := Kind_Value (Captured_Kind (Position, Moves (I)));
+                  declare
+                     Tmp : constant Move_Type := Moves (T);
+                  begin
+                     Moves (T) := Moves (I);
+                     Moves (I) := Tmp;
+                  end;
+               end if;
+            end loop;
+         else
+            T := Count;
+            for I in 1 .. Count loop
+               Vic (I) := Kind_Value (Captured_Kind (Position, Moves (I)));
+            end loop;
+         end if;
 
          for I in 1 .. T loop
             declare
@@ -736,6 +755,11 @@ package body BBChess.Search is
       if Depth = 0 then
          return Quiescence (Ctx, Position, A, B, Ply);
       end if;
+
+      -- Prefetch the transposition-table bucket now, so its cache miss is
+      -- resolved by the time the probe below reads it (the prologue and the
+      -- repetition/syzygy/mate-distance checks in between hide the latency).
+      Prefetch_TT (Transposition_Table (TT_Bucket (Position))'Address);
 
       -- Record the current node on the search path (for the repetition
       -- detection of its descendants) and claim a draw on a repetition
@@ -907,9 +931,15 @@ package body BBChess.Search is
       declare
          Ord : Order_Array;
          Tac : Flag_Array;
+         -- Occupancy of the side not to move, loop-invariant during the
+         -- ordering pass; the per-move tactical test is then a single bit
+         -- test against it (same predicate as Is_Tactical).
+         Enemy_Occ : constant Bitboard :=
+           Color_Board (Position, Opposite (Position.Side));
       begin
          for J in 1 .. Count loop
-            Tac (J) := Is_Tactical (Position, Moves (J));
+            Tac (J) := Moves (J).Flag in En_Passant | Promotion
+              or else (Enemy_Occ and Bit (Moves (J).To)) /= 0;
             Ord (J) := Order (Ctx, Position, Moves (J), Hash_Move, Ply,
                               Tac (J));
          end loop;
