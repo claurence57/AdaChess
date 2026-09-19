@@ -1413,3 +1413,64 @@ Conclusion : sur ce moteur, le **seul levier de force démontré** est
 l'optimisation CPU (≈ ×2 vitesse ⇒ ≈ +170 Elo) ; le tuning de l'évaluation
 (Texel, SPSA, §20-21) est resté **neutre/négatif**. Priorité future : continuer
 le profilage et l'optimisation.
+
+---
+
+## 33. Optimisation CPU #4 (×1,08) — adoptée
+
+Quatrième passe de profilage/optimisation `perf` (bench 11), toujours **sans
+changement de comportement** (`--bench 9/11` = **801 778 / 2 618 135** nœuds
+exacts, `--selftest` vert, perft 1→5 inchangé, `portable` vert).
+
+**Profil de départ** (self-%, cycles, bench 11) : `Negamax` ~37 % (dont ~19 %
+sur le chargement du bucket TT, cache-miss), `Positional_Score` ~21 %,
+`Generate_Legal_Common` ~16 %, `Quiescence` 4,4 %, `SEE.Exchange` 4,2 %,
+`Make_Move` 3,4 %, `King_Safety` 2,9 %. Instructions de référence :
+**7 293 943 192** (bench 11).
+
+Changements retenus (tous vérifiés **éval byte-identique** sur 41 positions
+diag + 10 000 positions aléatoires, bestmoves identiques à profondeur 8 sur les
+40 positions et 10 sur un sous-ensemble) :
+
+- **`Negamax` — prefetch TT** : `__builtin_prefetch` (intrinsèque GCC importé
+  en Ada) sur le bucket TT **dès l'entrée du nœud**, avant les tests de
+  nulle/mat ; le cache-miss se recouvre avec le prologue. Pur indice, aucun
+  effet architectural. C'est le gain le plus rentable (l'attente mémoire du
+  probe dominait le profil cycles).
+- **`Quiescence` — partition tactique sautée hors échec** : en position calme
+  le générateur ne produit déjà que des coups tactiques, donc la passe de
+  filtrage `Is_Tactical` + permutations est un no-op ; elle n'est conservée que
+  dans le cas « en échec ».
+- **`Negamax` — `Is_Tactical` hissé** : l'occupation ennemie est calculée une
+  fois hors de la boucle d'ordonnancement (prédicat identique).
+- **`Movegen` — `Target_Mask` hissé** : masque de cibles (ennemi si tactique,
+  non-soi sinon) calculé une fois au lieu d'être re-testé par pièce des 5
+  boucles de génération.
+- **`King_Safety` — bouclier/storm en pur bitboard** : le minimum par colonne
+  des pions est remplacé par des tests de rang (masques précalculés
+  `Shield_Row_Mask` / `Home_Row_Mask`) et la tempête par un **popcount** unique
+  (`Storm_Mask`) au lieu d'une boucle par pion.
+- **`Positional_Score` — structure de pions repliée par fichier** : les huit
+  popcounts par colonne sont remplacés par un repli des rangs en un octet de
+  présence ; doublés = `popcount(pions) − nb_colonnes`, isolés = popcount de
+  l'expansion des colonnes isolées. Algèbre exacte (linéarité), éval identique.
+- **`Front_Blockers` — remplissage logarithmique (Kogge-Stone)** des rangs 1..7
+  en 3 décalages doublants + 1 décalage final, au lieu de 7 itérations.
+
+**Mesure** (A/B cycles entrelacé, min et médiane concordants sur 12 répétitions) :
+
+| | avant (opt3) | après (opt4) | facteur |
+|---|---|---|---|
+| instructions bench 11 | 7,294 G | 6,787 G | **−6,9 %** |
+| cycles bench 11 | 3,559 G | 3,343 G | **−6,1 %** |
+| A/B entrelacé (min) | 3,498 G | 3,231 G | **×1,08** |
+
+`--bench 9` 0,278 → ~0,235 s. Candidats **rejetés après mesure** (plus lents ou
+neutres) : accumulateurs scalaires d'éval, cumul de mobilité par type,
+popcounts de menace par type, prefetch des deux entrées du bucket, hoist du roi
+« à la maison ».
+
+**SPRT 300 à 1+0,1 vs opt3 : NEW 91-78-131 (52,2 %), +15,1 ± 29,5 Elo,
+LOS 84,1 % → positif (non significatif).** Adoptée sur le même critère objectif
+que opt1/opt2/opt3 (arbre bit-identique, éval byte-identique, plus rapide).
+Voir `CHANGELOG.md`.

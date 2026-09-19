@@ -251,12 +251,24 @@
   `--selftest`/`portable` verts. SPRT vs opt2 : **+16,2 ± 30,3 Elo, LOS 85 %**.
   Voir `DEVELOPMENT.md` §31.
 
+### Performance — optimisation CPU #4 (×1,08, arbre identique)
+
+- **`Negamax`** (prefetch TT à l'entrée du nœud, `Is_Tactical` hissé), **movegen**
+  (`Target_Mask` hissé), **éval** (structure de pions repliée par fichier,
+  bouclier/tempête du roi en pur bitboard, `Front_Blockers` Kogge-Stone),
+  **quiescence** (partition tactique sautée hors échec).
+- `--bench 11` **−6,9 % d'instructions** (7,29 → 6,79 G), ×1,08 en cycles A/B ;
+  **nœuds identiques**, éval byte-identique (41 diag + 10 000 aléatoires),
+  bestmoves identiques ; `--selftest`/`portable` verts. SPRT vs opt3 :
+  **+15,1 ± 29,5 Elo, LOS 84 %**. Voir `DEVELOPMENT.md` §33.
+
 ### Bilan — optimisations CPU cumulées (×2,01, +170 Elo)
 
 Trois passes d'optimisation sans changement d'arbre (§29-31). SPRT 300 à 1+0,1
 du moteur actuel vs baseline pré-optimisation : **NEW 122-19-86 (72,7 %),
 +170,0 ± 36,8 Elo, LOS 100 %, PASS**. `--bench 9` 0,589 → 0,278 s (×2,1).
-Voir `DEVELOPMENT.md` §32.
+La 4ᵉ passe (§33) ajoute **×1,08** (cumul ≈ **×2,17**). Voir `DEVELOPMENT.md`
+§32-33.
 
 ### Outillage — harnais A/B équitable
 
