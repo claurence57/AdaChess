@@ -1460,26 +1460,42 @@ package body BBChess.Search is
                               Position   : in Position_Type;
                               Max_Depth  : in Natural;
                               Time_Alloc : in Duration;
+                              Soft_Alloc : in Duration;
                               Report     : in Boolean) return Thread_Result
    is
-      Result     : Thread_Result;
-      Work       : Position_Type := Position;
-      Best       : Move_Type := Empty_Move;
-      Best_Score : Score_Type := 0;
-      Alpha      : Score_Type := -Infinity;
-      Beta       : Score_Type := Infinity;
-      Score      : Score_Type;
-      T0         : constant Time := Clock;
-      Nodes_Base : constant Natural := Ctx.Nodes_Count;
-      Completed  : Boolean := False;
-      Last_Depth : Natural := 0;
+      Result      : Thread_Result;
+      Work        : Position_Type := Position;
+      Best        : Move_Type := Empty_Move;
+      Best_Score  : Score_Type := 0;
+      Alpha       : Score_Type := -Infinity;
+      Beta        : Score_Type := Infinity;
+      Score       : Score_Type;
+      T0          : constant Time := Clock;
+      Nodes_Base  : constant Natural := Ctx.Nodes_Count;
+      Completed   : Boolean := False;
+      Last_Depth  : Natural := 0;
+      Elapsed     : Duration;
+      Prev_Iter   : Duration := 0.0;
    begin
       Work.Key := Hash.Compute (Work);
 
       begin
          for D in 1 .. Max_Depth loop
+            Elapsed := To_Duration (Clock - Ctx.Start_Time);
+            --  Iteration-level (soft) stop: never start a new iteration
+            --  once the soft target is reached, nor when the previous
+            --  iteration would be repeated past it. The very first
+            --  iteration is always attempted: it is the only one that can
+            --  produce a move, and Hard_Alloc still cuts it short.
             if Time_Alloc > 0.0
-              and then To_Duration (Clock - Ctx.Start_Time) >= Time_Alloc
+              and then Elapsed >= Time_Alloc
+            then
+               exit;
+            end if;
+            if Soft_Alloc > 0.0
+              and then D > 1
+              and then (Elapsed >= Soft_Alloc
+                        or else Elapsed + Prev_Iter > Soft_Alloc)
             then
                exit;
             end if;
@@ -1501,6 +1517,9 @@ package body BBChess.Search is
             Best_Score := Score;
             Completed := True;
             Last_Depth := D;
+            --  Duration of the iteration just completed (used to estimate
+            --  whether the next one can still fit under the soft target).
+            Prev_Iter := To_Duration (Clock - Ctx.Start_Time) - Elapsed;
 
             if Report then
                Report_Iteration (D, Best_Score, To_Duration (Clock - T0),
@@ -1585,7 +1604,7 @@ package body BBChess.Search is
          Ctx : Context_Access := new Search_Context;
       begin
          Init_Context (Ctx, Arm => False, Budget => 0.0);
-         Result := Iterative_Search (Ctx, Position, Depth, 0.0, False);
+         Result := Iterative_Search (Ctx, Position, Depth, 0.0, 0.0, False);
          Accum_Nodes := Accum_Nodes + Ctx.Nodes_Count;
          Free_Context (Ctx);
       end;
@@ -1654,6 +1673,7 @@ package body BBChess.Search is
    Root_Position  : Position_Type;
    Root_Max_Depth : Natural := 1;
    Root_Time      : Duration := 0.0;
+   Root_Soft      : Duration := 0.0;
    Root_Node_Cap  : Natural := 0;
    Results        : array (1 .. Max_Threads) of Thread_Result;
 
@@ -1665,7 +1685,7 @@ package body BBChess.Search is
       Init_Context (Ctx, Arm => Root_Time > 0.0, Budget => Root_Time,
                     Node_Cap => Root_Node_Cap);
       Results (Id) := Iterative_Search (Ctx, Root_Position,
-                                        Root_Max_Depth, Root_Time,
+                                        Root_Max_Depth, Root_Time, Root_Soft,
                                         Report => (Id = 1));
       Free_Context (Ctx);
       -- The primary thread stops the helpers as soon as it is done.
@@ -1677,11 +1697,14 @@ package body BBChess.Search is
 
    type Searcher_Access is access Searcher;
 
-   -- Fixed-depth + time + node cap: the actual implementation.
-   function Best_Move (Position   : in Position_Type;
-                        Max_Depth  : in Natural;
-                        Time_Alloc : in Duration;
-                        Node_Cap   : in Natural) return Move_Type
+   -- Shared implementation. Hard_Alloc is the interruptible deadline, Soft_Alloc
+   -- the between-iteration target, Node_Cap the optional node ceiling. The
+   -- public overloads below map onto it.
+   function Best_Move_Impl (Position   : in Position_Type;
+                            Max_Depth  : in Natural;
+                            Hard_Alloc : in Duration;
+                            Soft_Alloc : in Duration;
+                            Node_Cap   : in Natural) return Move_Type
    is
       Best : Move_Type := Empty_Move;
    begin
@@ -1702,10 +1725,10 @@ package body BBChess.Search is
             Ctx    : Context_Access := new Search_Context;
             Result : Thread_Result;
          begin
-            Init_Context (Ctx, Arm => Time_Alloc > 0.0, Budget => Time_Alloc,
+            Init_Context (Ctx, Arm => Hard_Alloc > 0.0, Budget => Hard_Alloc,
                           Node_Cap => Node_Cap);
             Result := Iterative_Search (Ctx, Position, Max_Depth,
-                                        Time_Alloc, True);
+                                        Hard_Alloc, Soft_Alloc, True);
             Accum_Nodes := Accum_Nodes + Ctx.Nodes_Count;
             Free_Context (Ctx);
             if Result.Best = Empty_Move then
@@ -1718,7 +1741,8 @@ package body BBChess.Search is
       -- Multi-threaded Lazy SMP.
       Root_Position := Position;
       Root_Max_Depth := Max_Depth;
-      Root_Time := Time_Alloc;
+      Root_Time := Hard_Alloc;
+      Root_Soft := Soft_Alloc;
       Root_Node_Cap := Node_Cap;
       Done.Reset;
 
@@ -1757,14 +1781,36 @@ package body BBChess.Search is
          Best := Quick_Move (Position);
       end if;
       return Best;
+   end Best_Move_Impl;
+
+   -- Fixed-depth + time + node cap: the actual implementation.
+   function Best_Move (Position   : in Position_Type;
+                        Max_Depth  : in Natural;
+                        Time_Alloc : in Duration;
+                        Node_Cap   : in Natural) return Move_Type is
+   begin
+      -- A single deadline doubles as both the hard and the soft limit.
+      return Best_Move_Impl (Position, Max_Depth, Time_Alloc, Time_Alloc,
+                             Node_Cap);
    end Best_Move;
 
-   -- Timed entry point unchanged for XBoard play: no node cap.
+   -- Soft/hard entry point. The hard limit is the interruptible deadline
+   -- armed in the context; the soft limit is only consulted between
+   -- iterations. Node cap disabled (0): a soft/hard search is a timed move.
+   function Best_Move (Position   : in Position_Type;
+                        Max_Depth  : in Natural;
+                        Soft_Alloc : in Duration;
+                        Hard_Alloc : in Duration) return Move_Type is
+   begin
+      return Best_Move_Impl (Position, Max_Depth, Hard_Alloc, Soft_Alloc, 0);
+   end Best_Move;
+
+   -- Timed entry point for XBoard play: no node cap.
    function Best_Move (Position   : in Position_Type;
                        Max_Depth  : in Natural;
                        Time_Alloc : in Duration) return Move_Type is
    begin
-      return Best_Move (Position, Max_Depth, Time_Alloc, 0);
+      return Best_Move_Impl (Position, Max_Depth, Time_Alloc, Time_Alloc, 0);
    end Best_Move;
 
 end BBChess.Search;

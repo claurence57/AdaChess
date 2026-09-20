@@ -67,6 +67,18 @@ package BBChess.Search is
    -- recursion like the deadline, so a move is returned within one poll
    -- interval of the cap. Used by the UCI "go nodes" command.
 
+   function Best_Move (Position   : in Position_Type;
+                        Max_Depth  : in Natural;
+                        Soft_Alloc : in Duration;
+                        Hard_Alloc : in Duration) return Move_Type;
+   -- Soft/hard time management. Hard_Alloc is the deadline an iteration
+   -- already started may not run past (polled inside the recursion, like
+   -- Time_Alloc above). Soft_Alloc is the iteration-level target: no new
+   -- iteration is started once it is reached, nor when the elapsed time plus
+   -- the previous iteration's duration would clearly overshoot it. A single
+   -- early iteration is always allowed to run (up to Hard_Alloc). With
+   -- Hard_Alloc = 0 the call behaves like the fixed-time entry point.
+
    procedure Request_Stop;
    -- Ask the running timed Best_Move to return as soon as possible (polled
    -- inside the recursion). The caller keeps the last completed iteration.

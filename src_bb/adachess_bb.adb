@@ -45,6 +45,9 @@ use BBChess.Fen;
 with BBChess.Search;
 use BBChess.Search;
 
+with BBChess.Clocks;
+use BBChess.Clocks;
+
 with BBChess.Notation;
 use BBChess.Notation;
 
@@ -122,11 +125,13 @@ procedure AdaChess_BB is
       Record_Current_Key;
    end Reset_Game_History;
 
-   -- Clock state, driven by the XBoard "st", "level" and "time" commands.
+   -- Clock state, driven by the XBoard "st", "level" and "time" commands and
+   -- by the UCI "go" parameters.
    Fixed_Time     : Boolean := False;  -- "st <s>": think exactly that long
    Move_Time      : Duration := 1.0;   -- fixed budget, or fallback w/o clock
    Clock_Left     : Duration := 0.0;   -- own remaining time ("time", seconds)
    Time_Increment : Duration := 0.0;   -- per-move increment ("level", seconds)
+   Moves_To_Go    : Natural := 0;      -- 0 = unknown ("movestogo"/"level")
    Max_Depth      : Natural := 64;
 
    Current_Command : String (1 .. 64);
@@ -134,31 +139,20 @@ procedure AdaChess_BB is
    Parameter       : String (1 .. 8192);
    Par_Last        : Natural;
 
-   -- Time to spend on the next move. When a clock is known, allocate a
-   -- fraction of the remaining time (plus part of the increment), bounded
-   -- by a hard cap and by the actual time still on the clock, so a burst
-   -- of long moves can never eat the whole remaining budget.
-   function Time_For_Next_Move return Duration is
-      Alloc : Duration;
+   -- Time to spend on the next move, as a soft/hard pair. With a clock the
+   -- budget is a fraction of the remaining time plus part of the increment;
+   -- the fraction shrinks when the GUI announces fewer moves to go
+   -- ("movestogo" / "level"), and a fixed safety margin is always reserved
+   -- on the clock. A fixed budget ("st" / UCI movetime) is exact.
+   function Time_For_Next_Move return BBChess.Clocks.Allocation is
    begin
       if Fixed_Time then
-         return Move_Time;
+         return Exact (Move_Time);
       end if;
       if Clock_Left <= 0.0 then
-         return Move_Time;
+         return Exact (Move_Time);
       end if;
-
-      Alloc := Clock_Left / 30.0 + 0.75 * Time_Increment;
-      if Alloc > 2.0 then
-         Alloc := 2.0;
-      end if;
-      if Alloc > Clock_Left - 0.05 then
-         Alloc := Clock_Left - 0.05;
-      end if;
-      if Alloc < 0.01 then
-         Alloc := 0.01;
-      end if;
-      return Alloc;
+      return Clock_Based (Clock_Left, Time_Increment, Moves_To_Go);
    end Time_For_Next_Move;
 
    -------------------
@@ -231,6 +225,16 @@ procedure AdaChess_BB is
       end loop;
    end Load_Default_Book;
 
+   -- Count down the moves left in the current session ("level" moves /
+   -- "movestogo"), so the fraction of the clock allocated per move grows as
+   -- the session limit approaches.
+   procedure Consume_Move_Count is
+   begin
+      if Moves_To_Go > 0 then
+         Moves_To_Go := Moves_To_Go - 1;
+      end if;
+   end Consume_Move_Count;
+
    -- Search and play when it is the engine's turn. Called after the
    -- opponent's move has been applied and from the "go" / "?" prompts, so
    -- that the search always starts with an up-to-date view of the clock.
@@ -253,6 +257,7 @@ procedure AdaChess_BB is
                Ada.Text_IO.Flush;
                Make_Move (Pos, BM, Undo);
                Record_Current_Key;
+               Consume_Move_Count;
                return;
             end if;
          end;
@@ -260,9 +265,10 @@ procedure AdaChess_BB is
          -- Give the game history to the search before it thinks.
          Sync_Game_History;
          declare
-            M    : constant Move_Type :=
-              Best_Move (Pos, Max_Depth, Time_For_Next_Move);
-            Undo : Undo_Info;
+            Alloc : constant BBChess.Clocks.Allocation := Time_For_Next_Move;
+            M     : constant Move_Type :=
+              Best_Move (Pos, Max_Depth, Alloc.Soft, Alloc.Hard);
+            Undo  : Undo_Info;
          begin
             if M /= Empty_Move then
                Ada.Text_IO.Put ("move ");
@@ -271,6 +277,7 @@ procedure AdaChess_BB is
                Ada.Text_IO.Flush;
                Make_Move (Pos, M, Undo);
                Record_Current_Key;
+               Consume_Move_Count;
             end if;
          end;
       end if;
@@ -421,7 +428,8 @@ procedure AdaChess_BB is
 
    task type UCI_Search_Task is
       entry Start (P : in Position_Type; D : in Natural;
-                   T : in Duration; Node_Cap : in Natural);
+                   Soft : in Duration; Hard : in Duration;
+                   Node_Cap : in Natural);
       entry Stop_Now;
    end UCI_Search_Task;
 
@@ -429,17 +437,20 @@ procedure AdaChess_BB is
       Position : Position_Type;
       M        : Move_Type;
       Depth    : Natural;
-      Budget   : Duration;
+      Soft_Alloc : Duration;
+      Hard_Alloc : Duration;
       Cap      : Natural;
    begin
       loop
          select
             accept Start (P : in Position_Type; D : in Natural;
-                          T : in Duration; Node_Cap : in Natural)
+                          Soft : in Duration; Hard : in Duration;
+                          Node_Cap : in Natural)
             do
                Position := P;
                Depth  := D;
-               Budget := T;
+               Soft_Alloc := Soft;
+               Hard_Alloc := Hard;
                Cap    := Node_Cap;
                -- Busy from the moment the request is taken, and a "stop"
                -- that arrived after the previous search ended must not
@@ -448,7 +459,12 @@ procedure AdaChess_BB is
                Clear_Stop;
             end Start;
 
-            M := Best_Move (Position, Depth, Budget, Cap);
+            if Cap > 0 then
+               -- "go nodes"/"infinite": no soft target, deadline only.
+               M := Best_Move (Position, Depth, Hard_Alloc, Cap);
+            else
+               M := Best_Move (Position, Depth, Soft_Alloc, Hard_Alloc);
+            end if;
 
             UCI_Busy.Set_Busy (False);
             if M = Empty_Move then
@@ -501,6 +517,7 @@ procedure AdaChess_BB is
       Fixed_Time := False;
       Clock_Left := 0.0;
       Time_Increment := 0.0;
+      Moves_To_Go := 0;
       Max_Depth := 64;
 
       while I <= N loop
@@ -517,6 +534,8 @@ procedure AdaChess_BB is
                Time_Increment := Parse_Duration (Next, 0.0) / 1000.0;
             elsif Name = "binc" and then Pos.Side = Black then
                Time_Increment := Parse_Duration (Next, 0.0) / 1000.0;
+            elsif Name = "movestogo" then
+               Moves_To_Go := Parse_Natural (Next, 0);
             elsif Name = "movetime" then
                Fixed_Time := True;
                Move_Time := Parse_Duration (Next, 1.0) / 1000.0;
@@ -546,14 +565,14 @@ procedure AdaChess_BB is
 
       -- Time budget handed to the search. "infinite" and "nodes" ignore the
       -- clock: they are bounded only by "stop" / the node cap. A normal move
-      -- keeps the exact pre-Phase-5 budget (so fixed-depth play is unchanged).
+      -- uses the soft/hard allocation derived from the clock.
       declare
-         Budget : Duration;
+         Alloc : BBChess.Clocks.Allocation;
       begin
          if Infinite or else Node_Cap > 0 then
-            Budget := 0.0;
+            Alloc := (Soft => 0.0, Hard => 0.0);
          else
-            Budget := Time_For_Next_Move;
+            Alloc := Time_For_Next_Move;
          end if;
 
          -- A running search (double "go") is stopped first; the task then
@@ -567,7 +586,8 @@ procedure AdaChess_BB is
          Sync_Game_History;
 
          Ensure_UCI_Task;
-         Active_Task.Start (Pos, Max_Depth, Budget, Node_Cap);
+         Active_Task.Start (Pos, Max_Depth, Alloc.Soft, Alloc.Hard,
+                            Node_Cap);
       end;
    end Handle_UCI_Go;
 
@@ -874,6 +894,7 @@ begin
              Move_Time := 1.0;
              Clock_Left := 0.0;
              Time_Increment := 0.0;
+             Moves_To_Go := 0;
              Max_Depth := 64;
              Reset_Search;
              Reset_Game_History;
@@ -903,6 +924,7 @@ begin
             Play_If_My_Turn;
          elsif Cmd = "level" then
             declare
+               Mps_Token  : constant String := Token (Par, 1);
                Base_Token : constant String := Token (Par, 2);
                Inc_Token  : constant String := Token (Par, 3);
                Has_Colon  : Boolean := False;
@@ -916,6 +938,15 @@ begin
                exception
                   when Constraint_Error =>
                      Time_Increment := 0.0;
+               end;
+
+               -- Moves per session: 0 means "no session limit" and is kept as
+               -- the unknown case. The engine decrements it after each move.
+               begin
+                  Moves_To_Go := Natural'Value (Mps_Token);
+               exception
+                  when Constraint_Error =>
+                     Moves_To_Go := 0;
                end;
 
                -- A plain "level M base" uses whole minutes as the base.

@@ -37,6 +37,9 @@ use BBChess.See;
 with BBChess.Search;
 use BBChess.Search;
 
+with BBChess.Clocks;
+use BBChess.Clocks;
+
 with BBChess.Hash;
 use BBChess.Hash;
 
@@ -410,6 +413,105 @@ package body BBChess.Self_Tests is
          Assert (To_Duration (Clock - Start_T) < 2.0,
                  "timed Best_Move overran its budget");
       end;
+
+      -- Soft/hard time allocation (BBChess.Clocks): the arithmetic must
+      -- reserve a safety margin, keep hard = 2 x soft, honour movestogo and
+      -- never return more than the remaining clock.
+      declare
+         A : Allocation;
+      begin
+         A := Exact (0.1);
+         Assert (A.Soft = 0.1 and then A.Hard = 0.1,
+                 "exact budget must set soft = hard = movetime");
+
+         -- 1 s + 0.1 s, no move count: old fraction (1/30) + 0.75*inc.
+         A := Clock_Based (1.0, 0.1, 0);
+         Assert (A.Soft > 0.10 and then A.Soft < 0.12,
+                 "1s+0.1s allocation must stay near 0.11s");
+         Assert (A.Hard <= 1.0 - Safety_Margin,
+                 "hard limit must stay under the clock minus the margin");
+         Assert (A.Hard >= A.Soft, "hard limit must not be below soft");
+
+         -- Same clock, 10 moves to go: the per-move fraction must grow.
+         declare
+            B : constant Allocation := Clock_Based (1.0, 0.1, 10);
+         begin
+            Assert (B.Soft > A.Soft,
+                    "movestogo must increase the per-move allocation");
+            Assert (B.Soft <= 1.0 - Safety_Margin,
+                    "movestogo allocation must still reserve the margin");
+         end;
+
+         -- Small clock (0.3 s, no increment): soft = 1/30, well under the
+         -- 0.2 s reserve, hard = 2 x soft.
+         A := Clock_Based (0.3, 0.0, 0);
+         Assert (A.Soft < 0.3 - Safety_Margin,
+                 "small-clock allocation must stay under clock minus margin");
+         Assert (A.Hard <= 0.3 - Safety_Margin,
+                 "small-clock hard limit must stay under clock minus margin");
+
+         -- The allocation can never exceed the clock itself, whatever the
+         -- (even absurd) clock: at worst a 1 ms fallback.
+         A := Clock_Based (0.02, 0.0, 0);
+         Assert (A.Soft <= 0.02 and then A.Hard <= 0.02,
+                 "allocation must never exceed the remaining clock");
+      end;
+      Ada.Text_IO.Put_Line ("time allocation OK");
+
+      -- Soft/hard search: the hard limit is the interruptible deadline, the
+      -- soft one only stops the launching of a new iteration. A wide
+      -- soft/hard pair must still return a legal move within the hard bound.
+      declare
+         Start_T : constant Time := Clock;
+         Pos     : Position_Type := Start_Position;
+         Best    : Move_Type;
+         List    : Move_List;
+         Count   : Natural;
+         Found   : Boolean := False;
+      begin
+         Best := Best_Move (Pos, 64, Soft_Alloc => 0.02, Hard_Alloc => 0.30);
+         Generate_Legal_Moves (Pos, List, Count);
+         for I in 1 .. Count loop
+            if List (I) = Best then
+               Found := True;
+               exit;
+            end if;
+         end loop;
+         Ada.Text_IO.Put_Line
+           ("soft/hard search: legal=" & Boolean'Image (Found)
+            & ", elapsed=" & Duration'Image (To_Duration (Clock - Start_T)));
+         Assert (Found, "soft/hard Best_Move returned an illegal move");
+         Assert (To_Duration (Clock - Start_T) < 0.6,
+                 "soft/hard Best_Move overran its hard limit");
+      end;
+
+      -- A soft/hard search with both limits zero must be exactly a
+      -- fixed-depth search (same node count), so the new entry point does
+      -- not perturb untimed play.
+      declare
+         Pos          : Position_Type := Start_Position;
+         Ref_Move     : Move_Type;
+         Got_Move     : Move_Type;
+         Ref_Nodes    : Natural;
+         Got_Nodes    : Natural;
+      begin
+         Reset_Search;
+         Reset_Nodes;
+         Ref_Move := Best_Move (Pos, 5, 0.0, 0);
+         Ref_Nodes := Nodes_Searched;
+
+         Reset_Search;
+         Reset_Nodes;
+         Got_Move := Best_Move (Pos, 5, Soft_Alloc => 0.0, Hard_Alloc => 0.0);
+         Got_Nodes := Nodes_Searched;
+
+         Assert (Got_Nodes = Ref_Nodes,
+                 "zero soft/hard search must match the fixed-depth node count");
+         Assert (Got_Move = Ref_Move,
+                 "zero soft/hard search must match the fixed-depth move");
+         Reset_Search;
+      end;
+      Ada.Text_IO.Put_Line ("soft/hard search OK");
 
       -- Repetition handling: with a game history where the current position
       -- already occurred twice, the search must still return a legal move
