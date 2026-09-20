@@ -327,6 +327,22 @@ passes (bench 9 0,561 → 0,264 s, ×2,12) : **NEW 144-42-114 (67,0 %),
 - Combiné : **+10,4 ± 29,4 Elo, LOS 76 %** (subadditif). Audit complet
   (existant vs ajouté) dans `NOTES_TUNING.md`. Voir `DEVELOPMENT.md` §38.
 
+### Corrections — audit Oracle B1-B6 + outillage de match
+
+- **B1** répétition morte sous UCI (`Sync_Game_History` jamais appelé hors XBoard) ;
+  **B2** fuite `Stop_Search` après MT→ST (jeu quasi aléatoire) ; **B3** fuite du
+  `Search_Context` (~41 Ko/recherche) ; **B4** débordement tampon sous `-gnatp`
+  (nouveau `BBChess.Text`) ; **B5** course d'écriture TT sous Lazy SMP (clé
+  publiée en dernier).
+- **B6** borne quiescence non sound en échec : au plafond, détection du mat puis
+  **fail‑low** au lieu d'un score statique ; **SPRT +11,6 ± 28,7 Elo, LOS 79 %**.
+- Invariants préservés : `--selftest` vert, perft 1→5 exact, `portable` vert,
+  `--bench` bit‑identique pour B1‑B5 (593 601/1 769 496). Deux tests de
+  régression ajoutés au `--selftest`.
+- **Outillage** : `vs_gnuchess.sh` utilise la même suite d'ouvertures que
+  `sprt.sh` et neutralise le livre (l'ancien match partait de startpos → 70 % de
+  victoires Blanc). Voir `DEVELOPMENT.md` §39.
+
 ### Recherche — modulation du LMR par `improving` (rejetée)
 
 Flag `improving` (éval à 2 plis, même camp) modulant le LMR : arbre réduit

@@ -1671,3 +1671,52 @@ d'éval statique d'une position en échec et mat/joueur pat préservés.
 positif** (subadditif — les deux élags portent sur des lignes proches, mais
 chaque delta est individuellement positif). Gates : `--selftest` vert, perft
 1→5 identique, mat détecté, self‑play propre, `portable` vert pour les deux.
+
+---
+
+## 39. Corrections d'audit (B1-B6) et outillage de match
+
+Un audit **en lecture seule** (Oracle) a trouvé des défauts concrets, tous
+corrigés. Aucun ne changeait le chemin XBoard du SPRT, donc B1-B5 ne coûtent pas
+de non‑régression mesurable ; B6 change l'arbre (SPRT).
+
+**B1 — répétition morte sous UCI** (`adachess_bb.adb`) : `Sync_Game_History`
+n'était appelé que par le chemin XBoard ; sous UCI la recherche ne voyait pas les
+répétitions de la **partie réelle** (seulement celles internes à la recherche).
+Corrigé : appel avant le `Start` de la tâche. Preuve : sur triple répétition, le
+binaire pristine joue `g1f3` **+19** (aveugle), le corrigé `d2d4` **+2**.
+
+**B2 — fuite `Stop_Search`** (`bbchess-search.adb`) : après `Threads 4` puis
+`Threads 1`, le chemin mono‑thread abortait à la première sonde de `Poll_Time`
+→ `Empty_Move` → jeu quasi aléatoire. Corrigé : `Stop_Search := False` en tête du
+`Best_Move` 4‑args. Test de régression ajouté (nœuds ST après MT : 1024 → 1434).
+
+**B3 — fuite `Search_Context`** (~41 Ko par recherche, jamais libéré) : libéré via
+`Unchecked_Deallocation` aux trois sites.
+
+**B4 — débordement tampon sous `-gnatp`** : `Current_Command (1..64)` recevait un
+token jusqu'à ~8 Ko. Nouveau `BBChess.Text` (copies bornées) ; le build debug
+pristine **crashait**, le corrigé survit.
+
+**B5 — course d'écriture TT sous Lazy SMP** : l'entrée de 24 octets était écrite
+d'un bloc ; un lecteur pouvait voir la **clé neuve** avec un payload **périmé**
+(cutoff faux). Corrigé : `Hash_Key` **publiée en dernier** (payload d'abord,
+champ par champ). Arbre mono‑thread **bit‑identique**.
+
+**B6 — borne quiescence non sound en échec** : au plafond, un nœud en échec
+notait ses évasions **statiquement** (`-Evaluate`) — la recapture adverse n'était
+pas vue, le score pouvait être grossièrement faux. Corrigé : détection du mat
+seule, puis **fail‑low** (`return A`). Nœuds 593 601 → 593 576 / 1 769 496 →
+1 769 154. **SPRT 300 vs HEAD : +11,6 ± 28,7 Elo, LOS 78,5 %** (correctif
+adopté : pas de régression, bug corrigé). La doc « un mat n'est jamais
+manqué » était trop forte : seuls les mats **dans le cap** ou **tout en échecs**
+sont garantis.
+
+**Outillage** : `scripts/vs_gnuchess.sh` utilise désormais la **même suite
+d'ouvertures** (`openings/openings.epd`) que `sprt.sh` et neutralise le livre des
+deux côtés. Auparavant chaque partie partait de la position initiale → biais
+Blanc massif (match de 25 part. vs GNU : BB 5-17-3 = 26 %, −181,7 ± 159,9 Elo,
+**70 % de victoires Blanc**).
+
+**Invariants** : `--selftest` vert, perft 1→5 exact, `portable` vert,
+`--bench` (593 601/1 769 496) préservé pour B1-B5.
