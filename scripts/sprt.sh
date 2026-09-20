@@ -15,13 +15,23 @@
 # Usage:
 #   scripts/sprt.sh [tc] [elo0] [elo1] [max_games] [seed] [old_engine] [new_engine]
 #
-#   tc          time control (default 1+0.1)
+#   tc          time control (default 1+0.1); IGNORED when NODES is set
 #   elo0, elo1  SPRT bounds in Elo (default 0 and 5)
 #   max_games   safety cap, rounded up to an even number (default 2000)
 #   old_engine  baseline binary  (default ~/bin/adachess_bb, tag bb-1.0)
 #   new_engine  candidate binary (default bin_bb/adachess_bb)
 #
-# Env overrides: ALPHA (0.05), BETA (0.05), OPENINGS, PROTO (xboard), MAXMOVES (200)
+# Env overrides: ALPHA (0.05), BETA (0.05), OPENINGS, PROTO (xboard), MAXMOVES (200),
+#                NODES (unset)
+#
+# Fixed-node mode (measure search quality independently of CPU speed):
+#   NODES=20000 scripts/sprt.sh 1+0.1 0 5 200 7 old new
+#   Pass a placeholder tc (ignored) so the positional arguments stay aligned.
+#   When NODES is set, cutechess-cli drives both engines with "nodes=N" per move
+#   instead of a time control. The node limit is only honoured by the engine's
+#   *UCI* path ("go nodes"), so PROTO defaults to uci in this mode; forcing
+#   PROTO=xboard keeps the match but the limit is NOT honoured (the engine would
+#   search on its XBoard clock).
 #
 # Note: to validate a *patch*, pass the previous build as OLD, e.g.
 #   scripts/sprt.sh 1+0.1 0 5 2000 7 /tmp/opencode/adachess_bb_p1 bin_bb/adachess_bb
@@ -40,8 +50,22 @@ NEW="${7:-${ROOT}/bin_bb/adachess_bb}"
 ALPHA="${ALPHA:-0.05}"
 BETA="${BETA:-0.05}"
 OPENINGS="${OPENINGS:-${ROOT}/openings/openings.epd}"
-PROTO="${PROTO:-xboard}"
 MAXMOVES="${MAXMOVES:-200}"
+NODES="${NODES:-}"
+
+# Fixed-node mode: the engine only honours a node cap on its UCI path
+# ("go nodes N"); XBoard has no equivalent command, so default to uci there.
+if [ -n "$NODES" ]; then
+  PROTO="${PROTO:-uci}"
+else
+  PROTO="${PROTO:-xboard}"
+fi
+
+if [ -n "$NODES" ]; then
+  MODE="fixed-nodes nodes=${NODES}/move (proto=${PROTO})"
+else
+  MODE="time-control tc=${TC} (proto=${PROTO})"
+fi
 
 OLD="$(realpath "$OLD")"
 NEW="$(realpath "$NEW")"
@@ -73,7 +97,7 @@ ROUNDS=$(( (MAXGAMES + 1) / 2 ))
 
 echo "SPRT: OLD=$OLD"
 echo "      NEW=$NEW"
-echo "      tc=${TC} elo0=${ELO0} elo1=${ELO1} alpha=${ALPHA} beta=${BETA} max=${MAXGAMES} seed=${SEED}"
+echo "      mode=${MODE} elo0=${ELO0} elo1=${ELO1} alpha=${ALPHA} beta=${BETA} max=${MAXGAMES} seed=${SEED}"
 
 OPEN_OPT=()
 if [ -f "$OPENINGS" ]; then
@@ -86,10 +110,17 @@ fi
 # Pipe through tee so the raw cutechess output is kept for verdict parsing.
 # cutechess-cli applies the SPRT to the FIRST engine: keep NEW first, or the
 # PASS/FAIL reading below inverts (verified: OLD=bb-1.0, NEW ~+300 -> negative LLR).
+# Each-options: fixed node count per move in node mode, otherwise the time
+# control. cutechess still requires a tc, so node mode uses tc=inf (the engine
+# stops at nodes=N long before any clock matters).
+EACH_OPT=(tc="$TC")
+if [ -n "$NODES" ]; then
+  EACH_OPT=(tc=inf nodes="$NODES")
+fi
 cutechess-cli \
   -engine name=NEW cmd="$NEW" proto="$PROTO" dir="$(dirname "$NEW")" \
   -engine name=OLD cmd="$OLD" proto="$PROTO" dir="$(dirname "$OLD")" \
-  -each tc="$TC" -maxmoves "$MAXMOVES" \
+  -each "${EACH_OPT[@]}" -maxmoves "$MAXMOVES" \
   -games 2 -rounds "$ROUNDS" -repeat -srand "$SEED" \
   "${OPEN_OPT[@]}" \
   -sprt elo0="$ELO0" elo1="$ELO1" alpha="$ALPHA" beta="$BETA" \
