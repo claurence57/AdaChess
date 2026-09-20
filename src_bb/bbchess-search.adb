@@ -227,10 +227,30 @@ package body BBChess.Search is
      array (Color_Type, Square_Type, Square_Type) of Score_Type;
    type Path_Array is array (0 .. Max_Ply) of Bitboard;
 
+   -- Counter-move table: Counter (Side, From, To) is the move by Side that
+   -- refuted the opponent's move From-To (i.e. the reply that produced a beta
+   -- cutoff after From-To was played). Used as a quiet-move ordering term.
+   type Counter_Array is
+     array (Color_Type, Square_Type, Square_Type) of Move_Type;
+
+   -- 1-ply continuation history: indexed by the (piece, to) of the previous
+   -- move and the (piece, to) of the current move. Each pair is packed into a
+   -- single 0 .. 767 index so the table is a flat 768 x 768 score array.
+   type Cont_History_Array is array (0 .. 767, 0 .. 767) of Score_Type;
+
+   -- Move played at each ply of the current line: Move_Path (Ply) is the move
+   -- made from ply Ply to Ply + 1. A node at ply P looks up Move_Path (P - 1)
+   -- to recover the opponent's previous move (counter-move / continuation).
+   type Move_Path_Array is array (0 .. Max_Ply) of Move_Type;
+
    type Search_Context is
       record
          Killers          : Killer_Array := (others => (others => Empty_Move));
          History          : History_Array := (others => (others => (others => 0)));
+         Counter          : Counter_Array :=
+           (others => (others => (others => Empty_Move)));
+         Cont_History     : Cont_History_Array := (others => (others => 0));
+         Move_Path        : Move_Path_Array := (others => Empty_Move);
          Search_Path      : Path_Array := (others => 0);
          Game_Keys        : Game_Key_Array := (others => 0);
          Game_Key_Count   : Natural := 0;
@@ -285,6 +305,9 @@ package body BBChess.Search is
    begin
       Ctx.Killers := (others => (others => Empty_Move));
       Ctx.History := (others => (others => (others => 0)));
+      Ctx.Counter := (others => (others => (others => Empty_Move)));
+      Ctx.Cont_History := (others => (others => 0));
+      Ctx.Move_Path := (others => Empty_Move);
       Ctx.Search_Path := (others => 0);
       Ctx.Game_Key_Count := Init_Game_Key_Count;
       for I in 0 .. Init_Game_Key_Count - 1 loop
@@ -347,6 +370,12 @@ package body BBChess.Search is
 
    History_Max : constant Score_Type := 16_384;
 
+   -- Weight of the 1-ply continuation history in the quiet-move score. The
+   -- continuation table is keyed on the actual previous move, so it is a more
+   -- selective predictor than the plain (side, from, to) history; weighting it
+   -- up is what turns the combined ordering into a consistent node reduction.
+   Cont_History_Weight : constant Score_Type := 6;
+
    --  Scratch arrays used by the movers. They are written for every move in
    --  1 .. Count before the corresponding entry is read, so the per-call
    --  default initialization (a 1 KB zero fill each) is only overhead.
@@ -383,6 +412,30 @@ package body BBChess.Search is
       Ctx.History (Side, From, To) := V;
    end Bump_History;
 
+   -- Flat index of a move's (piece, destination) pair in the continuation
+   -- history table: 12 pieces x 64 squares = 768 entries.
+   function Cont_Index (Piece : in Piece_Type; To : in Square_Type)
+     return Natural is
+     (Piece_Type'Pos (Piece) * 64 + To);
+   pragma Inline (Cont_Index);
+
+   -- Continuation-history update for the current move, given the previous move
+   -- on the line. Uses the same saturation range as the main history table.
+   procedure Bump_Cont_History (Ctx        : in Context_Access;
+                                Prev, Move : in Move_Type;
+                                Bonus      : in Score_Type) is
+      K : constant Natural := Cont_Index (Prev.Piece, Prev.To);
+      J : constant Natural := Cont_Index (Move.Piece, Move.To);
+      V : Score_Type := Ctx.Cont_History (K, J) + Bonus;
+   begin
+      if V > History_Max then
+         V := History_Max;
+      elsif V < -History_Max then
+         V := -History_Max;
+      end if;
+      Ctx.Cont_History (K, J) := V;
+   end Bump_Cont_History;
+
    -- Kind of the piece captured by Move (pawns for en-passant; the moving
    -- piece itself when Move is not a capture - only used for ordering).
    function Captured_Kind (Position : in Position_Type; Move : in Move_Type)
@@ -400,14 +453,18 @@ package body BBChess.Search is
    pragma Inline (Captured_Kind);
 
    -- Move ordering score: hash move first, then captures (MVV-LVA), then
-   -- promotions, then the killers, then quiet moves ordered by the history
-   -- heuristic (moves that already produced beta cutoffs elsewhere).
+   -- promotions, then the killers, then the counter-move (the reply that
+   -- refuted the same previous move elsewhere), then quiet moves ordered by
+   -- the history + continuation-history heuristics (moves that already
+   -- produced beta cutoffs elsewhere).
    -- Tactical is the caller's Is_Tactical result for Move, passed in so the
    -- (cheap but repeated) test is not run twice per move during ordering.
+   -- Prev is the move made on the previous ply (Empty_Move at the root).
    function Order (Ctx        : in Context_Access;
                    Position   : in Position_Type;
                    Move       : in Move_Type;
                    Hash_Move  : in Move_Type;
+                   Prev       : in Move_Type;
                    Ply        : in Natural;
                    Tactical   : in Boolean) return Score_Type is
    begin
@@ -436,6 +493,26 @@ package body BBChess.Search is
          elsif Move = Ctx.Killers (2, Ply) then
             return 900_000;
          end if;
+         -- Counter-move: the move by the side to move that refuted the
+         -- opponent's previous move (From-To) in this thread's earlier search.
+         -- Indexed by the mover of the previous move (the opponent).
+         if Prev /= Empty_Move
+           and then Move = Ctx.Counter (Color (Prev.Piece), Prev.From, Prev.To)
+         then
+            return 800_000;
+         end if;
+      end if;
+
+      -- History + 1-ply continuation history. The continuation term is
+      -- weighted up: it is the more selective predictor (keyed on the actual
+      -- previous move), while the plain history stays as a fallback. The sum
+      -- is bounded (History_Max * (1 + Cont_History_Weight)) and stays well
+      -- below the counter-move and killer scores used above.
+      if Prev /= Empty_Move then
+         return Ctx.History (Color (Move.Piece), Move.From, Move.To)
+           + Cont_History_Weight
+             * Ctx.Cont_History (Cont_Index (Prev.Piece, Prev.To),
+                                 Cont_Index (Move.Piece, Move.To));
       end if;
       return Ctx.History (Color (Move.Piece), Move.From, Move.To);
    end Order;
@@ -864,8 +941,18 @@ package body BBChess.Search is
       TT_Bound    : Bound_Type := Exact;
       TT_Depth    : TT_Depth_Type := -1;
       Have_TT     : Boolean := False;
+      -- Move made on the previous ply (the move that led to this node); the
+      -- counter-move and continuation-history orderings key on it.
+      Prev        : Move_Type := Empty_Move;
    begin
       Poll_Time (Ctx);
+
+      -- Recover the previous move from this thread's per-ply move path. The
+      -- value is a by-value copy and every parent writes its own slot just
+      -- before recursing, so no stale pointer survives an Unmake.
+      if Ply >= 1 and then Ply - 1 <= Max_Ply then
+         Prev := Ctx.Move_Path (Ply - 1);
+      end if;
 
       -- Terminal draws: the fifty-move rule and dead positions are scored
       -- as draws before anything else, including the quiescence call.
@@ -1051,6 +1138,13 @@ package body BBChess.Search is
             Position.Side := Opposite (Position.Side);
             Position.Key := Position.Key xor Hash.Side_Key;
 
+            -- A null move has no real predecessor: clear this node's move
+            -- slot so the null child does not pick up a stale move (from an
+            -- unrelated subtree at the same ply) as its previous move.
+            if Ply <= Max_Ply then
+               Ctx.Move_Path (Ply) := Empty_Move;
+            end if;
+
             N_Score := -Negamax (Ctx, Position, N_Depth,
                                  Ply + 1, -B, -B + 1);
 
@@ -1073,7 +1167,7 @@ package body BBChess.Search is
            Color_Board (Position, Opposite (Position.Side));
       begin
          for J in 1 .. Count loop
-            Ord (J) := Order (Ctx, Position, Moves (J), Hash_Move, Ply,
+            Ord (J) := Order (Ctx, Position, Moves (J), Hash_Move, Prev, Ply,
                               (Moves (J).Flag in En_Passant | Promotion
                                or else (Enemy_Occ and Bit (Moves (J).To)) /= 0));
          end loop;
@@ -1148,6 +1242,14 @@ package body BBChess.Search is
 
                Make_Move (Position, Moves (I), Undo);
 
+               -- Record the move for the child's previous-move lookup. The
+               -- parent rewrites its own slot on every iteration and the child
+               -- copies it by value at node entry, so the value is always the
+               -- move actually on the board above it.
+               if Ply <= Max_Ply then
+                  Ctx.Move_Path (Ply) := Moves (I);
+               end if;
+
                if I = 1 then
                   Score := -Negamax (Ctx, Position, Move_Depth, Ply + 1, -B, -A);
                else
@@ -1167,12 +1269,17 @@ package body BBChess.Search is
                Unmake_Move (Position, Moves (I), Undo);
 
                -- Penalize a quiet move that failed to raise the window, so
-               -- the history heuristic learns to avoid it.
+               -- the history (and continuation history) heuristics learn to
+               -- avoid it.
                if not Tactical and then Ply <= Max_Ply
                  and then Score <= Alpha
                then
                   Bump_History (Ctx, Position.Side, Moves (I).From,
                                 Moves (I).To, -History_Bonus (Depth));
+                  if Prev /= Empty_Move then
+                     Bump_Cont_History (Ctx, Prev, Moves (I),
+                                        -History_Bonus (Depth));
+                  end if;
                end if;
 
                if Score > Best_Score then
@@ -1187,6 +1294,14 @@ package body BBChess.Search is
                      end if;
                      Bump_History (Ctx, Position.Side, Moves (I).From,
                                    Moves (I).To, History_Bonus (Depth));
+                     -- Learn the refutation of the opponent's previous move:
+                     -- Counter is keyed by the mover of that previous move.
+                     if Prev /= Empty_Move then
+                        Ctx.Counter (Opposite (Position.Side), Prev.From,
+                                     Prev.To) := Moves (I);
+                        Bump_Cont_History (Ctx, Prev, Moves (I),
+                                           History_Bonus (Depth));
+                     end if;
                   end if;
                   Store (Position, Depth, Lower_Bound, Score,
                          Best_Move_Here, Ply);
@@ -1247,7 +1362,8 @@ package body BBChess.Search is
          Ord : Order_Array;
       begin
          for J in 1 .. Count loop
-            Ord (J) := Order (Ctx, Position, Root_Moves (J), Prev_Best, 0,
+            Ord (J) := Order (Ctx, Position, Root_Moves (J), Prev_Best,
+                              Empty_Move, 0,
                               Is_Tactical (Position, Root_Moves (J)));
          end loop;
 
@@ -1279,6 +1395,10 @@ package body BBChess.Search is
                Score : Score_Type;
             begin
                Make_Move (Position, Root_Moves (I), Undo);
+
+               -- Publish the root move so the children at ply 1 see it as their
+               -- previous move (counter-move / continuation-history lookup).
+               Ctx.Move_Path (0) := Root_Moves (I);
 
                if I = 1 then
                   Score := -Negamax (Ctx, Position, Depth - 1, 1, -B, -A);
