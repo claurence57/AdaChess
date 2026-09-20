@@ -23,6 +23,8 @@ with Ada.Numerics.Elementary_Functions;
 
 with System;
 
+with Ada.Unchecked_Deallocation;
+
 with BBChess.Hash;
 use BBChess.Hash;
 
@@ -219,6 +221,13 @@ package body BBChess.Search is
          Time_Budget      : Duration := 0.0;
       end record;
    type Context_Access is access all Search_Context;
+
+   -- The context is allocated once per search (stack size would be a problem
+   -- inside the search tasks) and freed as soon as the search returns, so a
+   -- long session cannot leak ~40 KB per move.
+   procedure Free_Context is new
+     Ada.Unchecked_Deallocation (Object => Search_Context,
+                                 Name   => Context_Access);
 
    -- Keys of the game so far, copied into each thread's context.
    Init_Game_Keys  : Game_Key_Array := (others => 0);
@@ -1435,7 +1444,6 @@ package body BBChess.Search is
 
    function Best_Move (Position : in Position_Type; Depth : in Natural)
      return Move_Type is
-      Ctx    : constant Context_Access := new Search_Context;
       Result : Thread_Result;
    begin
       if Depth = 0 then
@@ -1443,11 +1451,17 @@ package body BBChess.Search is
       end if;
 
       Hash.Set_Keys_Enabled (True);
-      Init_Context (Ctx, Arm => False, Budget => 0.0);
       TT_Generation := TT_Generation + 1;
+      Stop_Search := False;
 
-      Result := Iterative_Search (Ctx, Position, Depth, 0.0, False);
-      Accum_Nodes := Accum_Nodes + Ctx.Nodes_Count;
+      declare
+         Ctx : Context_Access := new Search_Context;
+      begin
+         Init_Context (Ctx, Arm => False, Budget => 0.0);
+         Result := Iterative_Search (Ctx, Position, Depth, 0.0, False);
+         Accum_Nodes := Accum_Nodes + Ctx.Nodes_Count;
+         Free_Context (Ctx);
+      end;
 
       if Result.Best = Empty_Move then
          return Quick_Move (Position);
@@ -1519,13 +1533,14 @@ package body BBChess.Search is
    task type Searcher (Id : Positive);
 
    task body Searcher is
-      Ctx : constant Context_Access := new Search_Context;
+      Ctx : Context_Access := new Search_Context;
    begin
       Init_Context (Ctx, Arm => Root_Time > 0.0, Budget => Root_Time,
                     Node_Cap => Root_Node_Cap);
       Results (Id) := Iterative_Search (Ctx, Root_Position,
                                         Root_Max_Depth, Root_Time,
                                         Report => (Id = 1));
+      Free_Context (Ctx);
       -- The primary thread stops the helpers as soon as it is done.
       if Id = 1 then
          Stop_Search := True;
@@ -1550,9 +1565,14 @@ package body BBChess.Search is
       Hash.Set_Keys_Enabled (True);
       TT_Generation := TT_Generation + 1;
 
+      -- Clear the Lazy SMP stop flag once for every search: the previous
+      -- multi-threaded search leaves it set, and the single-threaded path
+      -- (which never clears it) would otherwise abort at the first poll.
+      Stop_Search := False;
+
       if Num_Threads <= 1 then
          declare
-            Ctx    : constant Context_Access := new Search_Context;
+            Ctx    : Context_Access := new Search_Context;
             Result : Thread_Result;
          begin
             Init_Context (Ctx, Arm => Time_Alloc > 0.0, Budget => Time_Alloc,
@@ -1560,6 +1580,7 @@ package body BBChess.Search is
             Result := Iterative_Search (Ctx, Position, Max_Depth,
                                         Time_Alloc, True);
             Accum_Nodes := Accum_Nodes + Ctx.Nodes_Count;
+            Free_Context (Ctx);
             if Result.Best = Empty_Move then
                return Quick_Move (Position);
             end if;
@@ -1572,7 +1593,6 @@ package body BBChess.Search is
       Root_Max_Depth := Max_Depth;
       Root_Time := Time_Alloc;
       Root_Node_Cap := Node_Cap;
-      Stop_Search := False;
       Done.Reset;
 
       declare

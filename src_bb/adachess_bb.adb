@@ -18,13 +18,11 @@
 
 with Ada.Text_IO;
 with Ada.Command_Line;
-with Ada.Characters.Handling;
 with Ada.Environment_Variables;
 with Ada.IO_Exceptions;
 with Ada.Real_Time;
 with Ada.Strings.Unbounded;
 
-use Ada.Characters.Handling;
 use Ada.Real_Time;
 
 with BBChess.Pieces;
@@ -59,87 +57,21 @@ with BBChess.Polyglot;
 
 with BBChess.Syzygy;
 
+with BBChess.Text;
+use BBChess.Text;
+
 procedure AdaChess_BB is
 
    Input_Line : String (1 .. 8192);
    Last       : Natural;
 
-   ---------------
-   -- Text utils --
-   ---------------
-
-   -- First whitespace separated word, lower-cased.
-   function First_Word (S : in String) return String is
-      I : Natural := S'First;
-   begin
-      while I <= S'Last and then S (I) /= ' ' and then S (I) /= ASCII.HT loop
-         I := I + 1;
-      end loop;
-      return To_Lower (S (S'First .. I - 1));
-   end First_Word;
-
-   -- Text after the first separator, trimmed.
-   function Rest_Of (S : in String) return String is
-      I : Natural := S'First;
-   begin
-      while I <= S'Last and then S (I) /= ' ' and then S (I) /= ASCII.HT loop
-         I := I + 1;
-      end loop;
-      while I <= S'Last and then S (I) in ' ' | ASCII.HT loop
-         I := I + 1;
-      end loop;
-      return S (I .. S'Last);
-   end Rest_Of;
-
-   -- N-th space separated token of S ("" when there is none).
-   function Token (Source : in String; N : in Positive) return String is
-      I      : Natural := Source'First;
-      Tokens : Natural := 0;
-   begin
-      while I <= Source'Last loop
-         while I <= Source'Last and then Source (I) = ' ' loop
-            I := I + 1;
-         end loop;
-         exit when I > Source'Last;
-         Tokens := Tokens + 1;
-         if Tokens = N then
-            declare
-               Start : constant Natural := I;
-            begin
-               while I <= Source'Last and then Source (I) /= ' ' loop
-                  I := I + 1;
-               end loop;
-               return Source (Start .. I - 1);
-            end;
-         end if;
-         while I <= Source'Last and then Source (I) /= ' ' loop
-            I := I + 1;
-         end loop;
-      end loop;
-      return "";
-   end Token;
-
    procedure Read_Line is
    begin
+      -- Input_Line is 8192 characters (the protocol's longest line is far
+      -- shorter); a longer line is simply truncated by Get_Line, which never
+      -- writes past the buffer.
       Ada.Text_IO.Get_Line (Input_Line, Last);
    end Read_Line;
-
-   -- Trim spaces/tabs at both ends.
-   function Trim_Both (S : in String) return String is
-      Lo : Natural := S'First;
-      Hi : Natural := S'Last;
-   begin
-      while Lo <= Hi and then S (Lo) in ' ' | ASCII.HT loop
-         Lo := Lo + 1;
-      end loop;
-      while Hi >= Lo and then S (Hi) in ' ' | ASCII.HT loop
-         Hi := Hi - 1;
-      end loop;
-      if Lo > Hi then
-         return "";
-      end if;
-      return S (Lo .. Hi);
-   end Trim_Both;
 
    -- Engine state.
    Pos         : Position_Type := Start_Position;
@@ -398,8 +330,9 @@ procedure AdaChess_BB is
          I := 2;
       elsif T1 = "fen" then
          declare
-            Fen : String (1 .. 256);
-            L   : Natural := 0;
+            Fen  : String (1 .. 256);
+            L    : Natural := 0;
+            Over : Boolean := False;
          begin
             for K in 2 .. 7 loop
                declare
@@ -407,21 +340,23 @@ procedure AdaChess_BB is
                begin
                   exit when Tok'Length = 0;
                   if L > 0 then
-                     L := L + 1;
-                     Fen (L) := ' ';
+                     Append_Bounded (Fen, L, " ", Over);
                   end if;
-                  for C of Tok loop
-                     L := L + 1;
-                     Fen (L) := C;
-                  end loop;
+                  Append_Bounded (Fen, L, Tok, Over);
                end;
             end loop;
-            begin
-               Load (Pos, Fen (1 .. L));
-            exception
-               when Constraint_Error =>
-                  Ada.Text_IO.Put_Line ("info string bad FEN");
-            end;
+            -- A FEN field list too long for the buffer is rejected rather
+            -- than loaded truncated (the buffer is ample for a legal FEN).
+            if Over then
+               Ada.Text_IO.Put_Line ("info string bad FEN");
+            else
+               begin
+                  Load (Pos, Fen (1 .. L));
+               exception
+                  when Constraint_Error =>
+                     Ada.Text_IO.Put_Line ("info string bad FEN");
+               end;
+            end if;
          end;
          I := 8;
       else
@@ -626,6 +561,10 @@ procedure AdaChess_BB is
          if UCI_Busy.Busy then
             Request_Stop;
          end if;
+
+         -- Hand the game history to the search (threefold-repetition
+         -- detection), exactly like the XBoard path does before thinking.
+         Sync_Game_History;
 
          Ensure_UCI_Task;
          Active_Task.Start (Pos, Max_Depth, Budget, Node_Cap);
@@ -833,16 +772,8 @@ begin
          if Trimmed'Length = 0 then
             goto Continue_Loop;
          end if;
-
-         declare
-            Word : constant String := First_Word (Trimmed);
-            Rest : constant String := Rest_Of (Trimmed);
-         begin
-            Current_Command (1 .. Word'Length) := Word;
-            Cmd_Last := Word'Length;
-            Parameter (1 .. Rest'Length) := Rest;
-            Par_Last := Rest'Length;
-         end;
+         Split_Command (Trimmed, Current_Command, Cmd_Last,
+                        Parameter, Par_Last);
       end;
 
       declare

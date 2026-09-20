@@ -43,6 +43,9 @@ use BBChess.Hash;
 with BBChess.Polyglot;
 use BBChess.Polyglot;
 
+with BBChess.Text;
+use BBChess.Text;
+
 package body BBChess.Self_Tests is
 
    procedure Assert (Condition : in Boolean; Message : in String) is
@@ -515,6 +518,111 @@ package body BBChess.Self_Tests is
             "polyglot key middlegame");
          Ada.Text_IO.Put_Line ("polyglot key OK");
       end;
+
+      -- B2 regression: after a multi-threaded search, Stop_Search stays set
+      -- (the Lazy SMP primary thread raises it to stop the helpers). A later
+      -- single-threaded search must clear it, otherwise it aborts at the
+      -- first Poll_Time checkpoint and falls back to Quick_Move. Compare the
+      -- move and the node count against a clean reference run on the same,
+      -- freshly reset position: they must be identical.
+      declare
+         Pos       : Position_Type;
+         Ref_Move  : Move_Type;
+         Got_Move  : Move_Type;
+         Ref_Nodes : Natural;
+         Got_Nodes : Natural;
+         List      : Move_List;
+         Count     : Natural;
+         Found     : Boolean := False;
+      begin
+         Pos := Start_Position;
+
+         -- Reference: a plain single-threaded search from a reset state.
+         Set_Threads (1);
+         Reset_Search;
+         Reset_Nodes;
+         Ref_Move := Best_Move (Pos, 5, 0.0, 0);
+         Ref_Nodes := Nodes_Searched;
+
+         -- Leave Stop_Search set by running a multi-threaded search.
+         Set_Threads (4);
+         Reset_Search;
+         declare
+            Ignored : Move_Type;
+         begin
+            Ignored := Best_Move (Pos, 5, 0.0, 0);
+            pragma Unreferenced (Ignored);
+         end;
+
+         -- Single-threaded again: must reproduce the reference exactly.
+         Set_Threads (1);
+         Reset_Search;
+         Reset_Nodes;
+         Got_Move := Best_Move (Pos, 5, 0.0, 0);
+         Got_Nodes := Nodes_Searched;
+
+         Generate_Legal_Moves (Pos, List, Count);
+         for I in 1 .. Count loop
+            if List (I) = Got_Move then
+               Found := True;
+               exit;
+            end if;
+         end loop;
+
+         Ada.Text_IO.Put_Line
+           ("MT-then-ST search: ref nodes=" & Natural'Image (Ref_Nodes)
+            & ", got nodes=" & Natural'Image (Got_Nodes));
+         Assert (Found, "single-threaded search after SMP returned an illegal move");
+         Assert (Got_Nodes = Ref_Nodes,
+                 "single-threaded search after SMP did not reach full depth");
+         Assert (Got_Move = Ref_Move,
+                 "single-threaded search after SMP differs from the reference");
+         Reset_Search;
+      end;
+
+      Ada.Text_IO.Put_Line ("MT-then-ST search OK");
+
+      -- B4 regression: a very long protocol token must be truncated safely
+      -- instead of overwriting adjacent state. Split_Command is the exact
+      -- helper the command loop uses; it must bound the copy to the buffer.
+      declare
+         Long   : constant String (1 .. 200) := (others => 'x');
+         Cmd    : String (1 .. 64);
+         Par    : String (1 .. 128);
+         Cmd_L  : Natural;
+         Par_L  : Natural;
+      begin
+         Split_Command (Long & " stop", Cmd, Cmd_L, Par, Par_L);
+         Assert (Cmd_L = Cmd'Length,
+                 "over-long command word must be truncated to the buffer");
+         Assert (Cmd (1) = 'x' and then Cmd (Cmd_L) = 'x',
+                 "truncated command must keep the leading characters");
+
+         -- A normal line right after must parse correctly: no state was
+         -- corrupted next to the command buffer.
+         Split_Command ("setboard 8/8/8/8/8/8/8/K6k w - - 0 1",
+                        Cmd, Cmd_L, Par, Par_L);
+         Assert (Cmd (1 .. Cmd_L) = "setboard", "normal command after long line");
+         Assert (Par (1 .. Par_L) = "8/8/8/8/8/8/8/K6k w - - 0 1",
+                 "normal parameter after long line");
+      end;
+
+      -- B4 regression: appending an over-long token to the FEN buffer must
+      -- drop the extra characters and never write past the end.
+      declare
+         Buf  : String (1 .. 16);
+         Last : Natural := 0;
+         Over : Boolean := False;
+      begin
+         Append_Bounded (Buf, Last, "12345678901234567890", Over);
+         Assert (Last = Buf'Length, "append must stop at the buffer length");
+         Assert (Over, "append must report the truncation");
+         Append_Bounded (Buf, Last, "abc", Over);
+         Assert (Last = Buf'Length and then Over,
+                 "append on a full buffer must stay bounded");
+      end;
+
+      Ada.Text_IO.Put_Line ("long-token handling OK");
 
       Ada.Text_IO.Put_Line ("all self tests OK");
    end Run;
