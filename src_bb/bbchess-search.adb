@@ -56,9 +56,11 @@ package body BBChess.Search is
    Delta_Margin : constant Score_Type := 200;
 
    -- Quiescence depth bound: a quiet (non-check) node at this many quiescence
-   -- plies stops expanding and returns the alpha-updated stand-pat score. An
-   -- in-check node keeps generating and searching evasions (so a mate is never
-   -- missed) and only its children are truncated.
+   -- plies stops expanding and returns the alpha-updated stand-pat score. At
+   -- the cap an in-check node still generates its evasions to detect mate, but
+   -- it cannot recurse, so its non-mate value is only a fail-low bound (never a
+   -- trusted static score). Mates within the cap and all-check mates are
+   -- guaranteed; a non-checking mate beyond the cap is not.
    Max_Q_Depth : constant := 8;
 
    ---------------
@@ -625,8 +627,8 @@ package body BBChess.Search is
    -- The QDepth parameter counts quiescence plies below the root of this
    -- quiescence call. At Max_Q_Depth the node is not expanded further: a quiet
    -- node returns its alpha-updated stand-pat score, while an in-check node
-   -- scores its evasions statically (a static eval of an in-check position is
-   -- never returned, and a mate is still detected).
+   -- only checks for mate and otherwise fails low. A static eval of an in-check
+   -- position is never returned.
    function Quiescence (Ctx        : in Context_Access;
                         Position   : in out Position_Type;
                         Alpha, Beta : in Score_Type;
@@ -646,33 +648,17 @@ package body BBChess.Search is
       -- Depth bound: stop expanding once the quiescence cap is reached.
       if QDepth >= Max_Q_Depth then
          if In_Check then
-            -- In check: every evasion is still tried, but each is scored
-            -- statically instead of recursing. This keeps the bound hard
-            -- without returning the static eval of an in-check position.
+            -- In check at the cap: the evasions cannot be searched (that would
+            -- defeat the bound), so only mate is detected. If evasions exist,
+            -- the opponent's recapture (or any deeper continuation) is not
+            -- searched, so the real value is unknown: return alpha as a
+            -- fail-low bound instead of a static-based score the parent would
+            -- treat as exact.
             Generate_Legal_Moves (Position, Moves, Count);
             if Count = 0 then
                return -(Mate_Score - Ply);
             end if;
-            declare
-               Best : Score_Type := -Infinity;
-            begin
-               for I in 1 .. Count loop
-                  declare
-                     Undo : Undo_Info;
-                  begin
-                     Make_Move (Position, Moves (I), Undo);
-                     declare
-                        S : constant Score_Type := -Evaluate (Position);
-                     begin
-                        Unmake_Move (Position, Moves (I), Undo);
-                        if S > Best then
-                           Best := S;
-                        end if;
-                     end;
-                  end;
-               end loop;
-               return Best;
-            end;
+            return A;
          else
             -- Not in check: the alpha-updated stand-pat score is the safe
             -- truncation (exactly the score the unbounded search would use
