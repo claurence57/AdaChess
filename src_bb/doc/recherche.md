@@ -279,8 +279,14 @@ recherche ne remonte que depuis le dernier coup irréversible (`Position.Halfmov
 - Le résultat retenu est celui du thread ayant atteint la **plus grande
   profondeur**, départagé par le score ; à défaut, `Quick_Move`.
 
-Les écritures dans la TT ne sont pas verrouillées : une entrée déchirée par une
-course échoue simplement au test de clé à la lecture, ce qui est bénin.
+Les écritures dans la TT ne sont pas verrouillées. Pour que les courses restent
+bénignes, `Store` écrit **le payload champ par champ, clé en dernier**, et la
+sonde **teste la clé avant de copier** l'entrée : un emplacement n'est utilisé
+que si la clé nouvelle est visible, donc avec un payload déjà consistant. Une
+clé ancienne sur un emplacement à moitié écrit échoue simplement au test de clé.
+Deux threads peuvent encore écrire des entrées valides dans le même emplacement
+(la dernière clé gagne) ou remplacer un emplacement entre le test et la copie,
+ce qui ne donne qu'un nœud key-consistent, éventuellement moins profond.
 
 ## Techniques gardées, retirées et à l'essai
 

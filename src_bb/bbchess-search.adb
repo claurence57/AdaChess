@@ -68,23 +68,29 @@ package body BBChess.Search is
    type Bound_Type is (Exact, Lower_Bound, Upper_Bound);
 
    --  Depth only ever holds 0 .. Max_Ply (128) on store and -1 as the empty
-   --  marker, so it is carried in 16 bits. The field order groups the wide
-   --  members first, so the record packs to 24 bytes (8 key + 4 move + 4 score
-   --  + 4 age + 1 bound + 2 depth + 1 padding) instead of 32. Field values,
-   --  entry acceptance and the replacement policy are unchanged, so the
-   --  search tree is bit-identical; the 32 MB table becomes 24 MB, closer to
-   --  the 8 MB L3.
+   --  marker, so it is carried in 16 bits. The wide members come first so the
+   --  record still packs to 24 bytes (8 key + 4 move + 4 score + 4 age + 1
+   --  bound + 2 depth + 1 padding) instead of 32; only Hash_Key moved to the
+   --  end (see below). Field values, entry acceptance and the replacement
+   --  policy are unchanged, so the search tree is bit-identical; the 32 MB
+   --  table becomes 24 MB, closer to the 8 MB L3.
    type TT_Depth_Type is range -1 .. 32_767;
    for TT_Depth_Type'Size use 16;
 
+   --  Hash_Key is deliberately the *last* field: Store writes the payload
+   --  field-by-field and the key last, so under Lazy SMP a racing reader can
+   --  never observe a new key paired with a stale payload. The reader checks
+   --  the key only to *decide* whether to use the slot, and only then copies
+   --  the entry, so a racing write is either seen whole or not at all (the
+   --  write may still tear, but the key test rejects the stale key).
    type TT_Entry is
       record
-         Hash_Key : Bitboard := 0;
          Move     : Packed_Move := 0;
          Score    : Score_Type := 0;
          Age      : Natural := 0;
          Bound    : Bound_Type := Exact;
          Depth    : TT_Depth_Type := -1;
+         Hash_Key : Bitboard := 0;
       end record;
 
    TT_Size   : constant := 1_048_576;
@@ -135,8 +141,14 @@ package body BBChess.Search is
    -- Store a node. Mate scores are normalized by the distance to the root
    -- so they stay comparable across different depths. The two-way bucket
    -- keeps the deeper of the two entries and replaces stale ones first.
-   -- Under Lazy SMP the table is written without locking: races are benign
-   -- (a torn entry simply fails the key test on read).
+   -- Under Lazy SMP the table is written without locking. The key is written
+   -- last (payload first, field-by-field) and checked before the payload is
+   -- read, so a torn read can only pair the new key with an already-valid
+   -- payload; the old key on a half-written slot simply fails the key test.
+   -- The remaining races are accepted Lazy SMP behaviour: two threads may
+   -- store different valid entries in the same slot (last key wins), and a
+   -- slot may be replaced between the probe's key test and the copy, which
+   -- only yields a shallower/deeper but still key-consistent node.
    procedure Store (Position : in Position_Type;
                     Depth     : in Natural;
                     Bound     : in Bound_Type;
@@ -190,10 +202,17 @@ package body BBChess.Search is
       end;
 
       if Repl then
-         Transposition_Table (Slot) :=
-           (Hash_Key => Position.Key, Depth => TT_Depth_Type (Depth),
-            Bound => Bound, Score => Saved, Move => Packed,
-            Age => TT_Generation);
+         --  Payload first, Hash_Key last. The key is the only field the probe
+         --  tests, so publishing it last means a reader that sees the new key
+         --  also sees a fully written payload. The write may tear, but a torn
+         --  slot keeps either the old key (probe misses) or the new key only
+         --  once the payload is consistent.
+         Transposition_Table (Slot).Move  := Packed;
+         Transposition_Table (Slot).Score := Saved;
+         Transposition_Table (Slot).Age   := TT_Generation;
+         Transposition_Table (Slot).Bound := Bound;
+         Transposition_Table (Slot).Depth := TT_Depth_Type (Depth);
+         Transposition_Table (Slot).Hash_Key := Position.Key;
       end if;
    end Store;
 
@@ -928,7 +947,9 @@ package body BBChess.Search is
          end if;
       end;
 
-      -- Transposition table probe (two-way bucket).
+      -- Transposition table probe (two-way bucket). Each slot's Hash_Key is
+      -- checked *before* its payload is copied, and Store publishes the key
+      -- last, so a slot is only used once its payload is consistent.
       declare
          Bk    : constant Natural := TT_Bucket (Position);
          Found : Boolean := False;
