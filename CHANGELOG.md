@@ -10,6 +10,22 @@
 > *Sisyphus* / OhMyOpenCode) et des **interfaces web**. Voir `DEVELOPMENT.md`
 > (note en tête et §11).
 
+### Gestion du temps — séparation soft/hard
+
+- Nouveau module pur `BBChess.Clocks` : `soft = restant/movestogo + 0,75×inc`,
+  `hard = 2×soft`, **réserve de 0,1 s** (contre 0,05 s) ; `movestogo`/`level`
+  lus et décrémentés.
+- `Iterative_Search` consulte le **soft** entre itérations (arrêt si
+  `écoulé ≥ soft` ou si l'itération suivante dépasserait le soft d'après la
+  précédente) et arme le **hard** comme échéance interruptible ; `movetime`/`st`
+  inchangés (soft = hard exact).
+- Sur-ensemble strict des points d'entrée existants (`go depth/nodes/infinite`
+  et recherche à profondeur fixe passent `soft = hard = échéance`) :
+  `--bench 9/11` = 496 570 / 1 434 292 nœuds exacts, perft 1→5 exact,
+  `--selftest` vert, `portable` vert.
+- **SPRT 1 000 part. à 1+0.1 vs HEAD : +49,6 ± 17,6 Elo, LOS 100 % → PREMIER
+  `PASS` de la campagne**, 0 forfait au temps. Voir `DEVELOPMENT.md` §41.
+
 ### Outillage UCI — Phase 5 (asynchrone)
 
 - La recherche UCI s'exécute désormais dans une **tâche** : `go` rend la main

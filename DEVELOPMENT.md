@@ -1756,3 +1756,57 @@ conformément à §39 pour trancher un effet de ~+20 Elo :
   `--threads 4` propres, `portable` vert.
 - Adopté. Patch hors dépôt : `/tmp/opencode/d3.patch`, binaire
   `/tmp/opencode/adachess_bb_d3`.
+
+---
+
+## 41. Gestion du temps — séparation soft/hard (audit §39)
+
+L'audit relevait une allocation **très conservatrice** et **sans split
+soft/hard** : `restant/30 + 0,75×incrément`, plafonnée à 2 s et à
+`restant − 0,05 s`. Le moteur laissait donc de nombreux coups sous-consommer la
+pendule (pas d'itération « de secours » au-delà de la cible) et n'exploitait pas
+`movestogo` / `level`.
+
+**Nouveau module pur `BBChess.Clocks`** (arithmétique testable en self-test) :
+
+- `Exact (movetime)` : soft = hard = temps demandé (comportement `st`/`movetime`
+  inchangé, aucune réserve).
+- `Clock_Based (restant, incrément, movestogo)` :
+  - `soft = restant / m + 0,75 × incrément`, avec `m = movestogo` s'il est
+    annoncé, sinon `m = 30` (l'ancien `/30`) ;
+  - plafond anti-pic `2 s` **seulement** quand `m` est inconnu ; un `movestogo`
+    explicite lève ce plafond (seule la réserve d'horloge borne) ;
+  - `hard = 2 × soft`, borné par la réserve ;
+  - **marge de sécurité de 0,1 s** réservée en permanence (`soft` et `hard`
+    ≤ `restant − 0,1 s`), contre 0,05 s auparavant ;
+  - plancher 1 ms.
+- Le **hard** est l'échéance interruptible armée dans le contexte (pollée toutes
+  les 1024 nœuds) ; le **soft** n'est consulté qu'entre itérations :
+  `Iterative_Search` ne lance plus de nouvelle itération dès que `écoulé ≥ soft`
+  **ou** que `écoulé + durée de l'itération précédente > soft`. La **toute
+  première itération** est toujours tentée (seule source de coup), bornée par le
+  hard. Nouvelle surcharge `Best_Move (Position, Max_Depth, Soft, Hard)`, sans
+  plafond de nœuds ; les surcharges existantes (profondeur fixe, échéance seule,
+  `go nodes`) passent `soft = hard = échéance` et sont donc bit-identiques.
+
+**Driver** : `movestogo` (UCI) et `level MPS base inc` (XBoard, token 1) sont
+lus ; le compteur est décrémenté après chaque coup joué (livre inclus). Les
+modes `go infinite`/`go nodes` restent sans budget (soft = hard = 0).
+
+**Gates** : `--selftest` vert, perft 1→5 exact, `--bench 9/11` =
+**496 570 / 1 434 292** nœuds exacts (aucune décision de recherche modifiée),
+build `portable` vert, parties réelles à `1+0.1` sans forfait (temps/coup
+rapporté). Nouveaux self-tests : arithmétique d'allocation (marge, hard ≥ soft,
+`movestogo`, petit restant) et non-régression nœuds/move soft/hard = profondeur
+fixe.
+
+**SPRT 1 000 parties à 1+0.1 vs HEAD** — le **premier `VERDICT: PASS` de la
+campagne** :
+
+- **NEW 269-156-372 (57,1 %), +49,6 ± 17,6 Elo, LOS 100 %, LLR 1,59 → PASS.**
+- **0 forfait au temps** sur tout le match (l'ancienne formule, plafonnée à 2 s
+  et sans itération « de secours », sous-utilisait la pendule : la nouvelle
+  exploite le hard limit et cherche plus profond à cadence fixe).
+
+Adopté. Patch hors dépôt : `/tmp/opencode/d5.patch`, binaire
+`/tmp/opencode/adachess_bb_d5`.
