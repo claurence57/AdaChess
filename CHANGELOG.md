@@ -327,6 +327,16 @@ passes (bench 9 0,561 → 0,264 s, ×2,12) : **NEW 144-42-114 (67,0 %),
 - Combiné : **+10,4 ± 29,4 Elo, LOS 76 %** (subadditif). Audit complet
   (existant vs ajouté) dans `NOTES_TUNING.md`. Voir `DEVELOPMENT.md` §38.
 
+### Recherche — ordonnancement counter-move + continuation history (gain confirmé)
+
+- **Counter-move** (`Counter (camp,depuis,vers)`, score 800 k) et **continuation
+  history 1 ply** (`768×768`, pondérée ×6), tables par thread + `Move_Path` copié
+  par valeur (null-move remis à `Empty_Move`). Nœuds `--bench 9` 593 576 →
+  496 570 (−16 %) ; `--bench 11` 1 769 154 → 1 434 292 (−19 %).
+- **SPRT 1 000 parties à 1+0.1 : +22,3 ± 15,5 Elo, LOS 99,8 %** (IC excluant 0) —
+  le gain de recherche le plus net et confirmé de la campagne. Voir
+  `DEVELOPMENT.md` §40.
+
 ### Corrections — audit Oracle B1-B6 + outillage de match
 
 - **B1** répétition morte sous UCI (`Sync_Game_History` jamais appelé hors XBoard) ;

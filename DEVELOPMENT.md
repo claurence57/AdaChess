@@ -1720,3 +1720,39 @@ Blanc massif (match de 25 part. vs GNU : BB 5-17-3 = 26 %, −181,7 ± 159,9 Elo
 
 **Invariants** : `--selftest` vert, perft 1→5 exact, `portable` vert,
 `--bench` (593 601/1 769 496) préservé pour B1-B5.
+
+---
+
+## 40. Ordonnancement — counter-move + continuation history (gain confirmé)
+
+Le plus grand manque moderne identifié par l'audit (§39) : l'ordonnancement
+n'utilisait que hash / promotions / MVV-LVA / killers / history
+`(camp, depuis, vers)`.
+
+**Ajouté** (uniquement `bbchess-search.adb`, tables par thread dans
+`Search_Context`, remises à zéro dans `Init_Context`) :
+
+- **Counter-move** `Counter (Camp, Depuis, Vers)` : le coup qui a réfuté le coup
+  adverse « Depuis-Vers » (score d'ordre **800 000**, juste sous les killers).
+- **Continuation history 1 ply** `Cont_History (768 × 768)`, indexée sur
+  `(pièce, case)` du coup **précédent** et du coup courant, même saturation que
+  l'history (`±16 384`), **pondérée ×6** dans le score d'ordre.
+- Nouveau `Move_Path (0..Max_Ply)` par thread : copié **par valeur** en entrée de
+  nœud (aucun pointeur → rien de périmé après `Unmake`) ; le null-move le remet à
+  `Empty_Move` pour qu'un enfant nul n'hérite pas d'un coup étranger. Vérifié
+  aussi en build `-gnata`.
+
+**Effet sur l'arbre** : réduction à **toutes** les profondeurs —
+`--bench 9` 593 576 → **496 570** (−16,3 %), `--bench 11` 1 769 154 →
+**1 434 292** (−18,9 %), d12 −13,3 %.
+
+**Validation (SPRT 1 000 parties, 1+0.1, graine 7)** — résolution choisie
+conformément à §39 pour trancher un effet de ~+20 Elo :
+
+- **NEW 291-227-482 (53,2 %), +22,3 ± 15,5 Elo, LOS 99,8 %** →
+  IC [≈ +7 ; +38] **exclut zéro**. C'est le **gain de recherche le plus net et
+  confirmé** de la campagne (les deltas §38, mesurés à 300 parties, restaient
+  dans le bruit). Gates : `--selftest` vert, perft 1→5 exact, self-play et
+  `--threads 4` propres, `portable` vert.
+- Adopté. Patch hors dépôt : `/tmp/opencode/d3.patch`, binaire
+  `/tmp/opencode/adachess_bb_d3`.
