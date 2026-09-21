@@ -1991,3 +1991,32 @@ identiques d8/d10, `portable` vert).
 modeste : le moteur approche l'épuisement des micro-optimisations sûres (le
 `Negamax` reste ~39 %, dominé par les accès mémoire au TT, déjà largement
 optimisés aux §33/§36-37).
+
+---
+
+## 47. Version 2.0 — instructions de build documentées, alias `-T#`, bilan CPU
+
+**Version** : `id name` / `feature myname` passent de « AdaChess-BB 1.0 » à
+**« AdaChess-BB 2.0 »** (tag `bb-2.0`), marquant la campagne Oracle complète
+(corrections B1‑B6, ordonnancement D3, gestion du temps D5, SMP D7, 7 passes
+CPU).
+
+**Alias du nombre de threads** : en plus de `--threads N`, le moteur accepte
+`-TN` et `--thread=N` (analyse par le nouveau `BBChess.Text.Thread_Count`,
+couvert par `--selftest` : `-T4`, `--thread=8`, `-T12`, et les replis
+malformés). `-T1` est équivalent au mono-thread (vérifié : mêmes bestmoves sur
+3 positions) ; les nœuds `--bench` restent **496 570 / 1 434 292**.
+
+**Documentation build + CPU** : nouveau `src_bb/doc/build-and-cpu.md` —
+commutateurs **exacts** des modes `release` / `portable` / `debug`, rôle de
+`-gnatep`/`-gnateDREL`/`-gnatp`/`-flto`, spécificité du mode **portable**
+(repli PEXT logiciel de `bbchess-bits.c`, tout x86-64, ≈ 25 % plus lent), et
+tableau récapitulatif des **7 passes CPU** (×2,3 cumulé ⇒ +123 ± 31,6 Elo,
+§32). Indexé depuis `src_bb/doc/README.md`.
+
+**Bilan CPU — « plus de gain facile », pas « rien à gagner »** : les sept passes
+« sûres » (arbre bit-identique) sont épuisées et les dernières rapportent < 1 %.
+Les réserves restantes sont structurelles et risquées — **évaluation
+incrémentale** dans `Make_Move`/`Unmake_Move`, et **réorganisation profonde du
+TT** (qui changerait les entrées acceptées) — et exigent preuve d'identité +
+SPRT long avant adoption. Détail dans `build-and-cpu.md`.

@@ -38,6 +38,19 @@
   **496 570 / 1 434 292** exacts, éval byte-identique, `--selftest`/`portable`
   verts. Voir `DEVELOPMENT.md` §46.
 
+### Version 2.0 — build documenté, alias `-T#`, bilan CPU
+
+- **`AdaChess-BB 2.0`** (`id name`/`myname`), tag `bb-2.0`.
+- Alias du nombre de threads : **`-TN`** et **`--thread=N`** (en plus de
+  `--threads N`), via `BBChess.Text.Thread_Count` (testé en `--selftest`) ;
+  nœuds `--bench` inchangés.
+- Nouveau `src_bb/doc/build-and-cpu.md` : commutateurs exacts `release` /
+  `portable` / `debug`, mode **portable** (repli PEXT logiciel, tout x86-64,
+  ≈ 25 % plus lent), tableau des 7 passes CPU (×2,3 ⇒ +123 ± 31,6 Elo).
+- Bilan : micro-optimisations sûres **épuisées** ; réserves restantes =
+  évaluation incrémentale et refonte du TT (risquées, à valider par SPRT long).
+  Voir `DEVELOPMENT.md` §47.
+
 ### Recherche — 17 constantes exposées en params + tuning SPSA (D4/D4b)
 
 - Marges de recherche (futilité, razoring, aspiration, delta, null, LMP, garde

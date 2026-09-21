@@ -134,7 +134,7 @@ flowchart LR
 |---|---|
 | `--selftest` | Exécute la suite interne (`BBChess.Self_Tests`) : perft 1-5, Zobrist, coups empaquetés, validation FEN, recherche, répétition, SEE, clé de Polyglot. Sortie 0. |
 | `--bench [profondeur]` | Cherche 8 positions fixes à profondeur donnée (défaut 8) et rapporte nœuds, temps et knps. |
-| `--threads N` | Nombre de threads de recherche Lazy SMP (1 à 16). La table de transposition est partagée, les heuristiques sont par thread. |
+| `--threads N` | Nombre de threads de recherche Lazy SMP (1 à 16). La table de transposition est partagée, les heuristiques sont par thread. Formes équivalentes : `-TN` et `--thread=N`. |
 | `--book <fichier>` | Ouvre un livre d'ouvertures Polyglot `.bin`. Sans option, BB tente des emplacements conventionnels (`books/book.bin`, dossier de l'exécutable, `~/.adachess/book.bin`). |
 | `--syzygy <dossier>` | Initialise les tablebases Syzygy via `BBChess.Syzygy.Init`. Inerte sans fichiers `.rtbw`/`.rtbz`. |
 | `--dump-params` | Affiche les paramètres scalaires de l'évaluation (`BBChess.Eval.Dump_Params`). |
@@ -188,6 +188,9 @@ binaire `release` sans `rm -rf obj_bb`.
   et sondage pondéré (`BBChess.Polyglot`).
 - [outils-et-tests.md](outils-et-tests.md) : `--selftest`, perft, `--bench`,
   `--eval-fens`, `--params`, scripts de mesure et SPRT.
+- [build-and-cpu.md](build-and-cpu.md) : modes de construction (`release`,
+  `portable`, `debug`), commutateurs GNAT/C exacts, alias `-T#`/`--thread=#` et
+  historique des optimisations CPU.
 
 ## Références
 
