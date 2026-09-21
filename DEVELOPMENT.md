@@ -1810,3 +1810,24 @@ campagne** :
 
 Adopté. Patch hors dépôt : `/tmp/opencode/d5.patch`, binaire
 `/tmp/opencode/adachess_bb_d5`.
+
+---
+
+## 42. Match externe vs GNU Chess après D3+D5 — non concluant
+
+Match **1 min + 1 s, 30 parties**, **ouvertures équitables**
+(`openings/openings.epd`, chaque ouverture jouée dans les deux couleurs) et
+**livre neutralisé des deux côtés** (nouveau `vs_gnuchess.sh`, §39).
+
+- **BB 2-17-11 = 25,0 %, ≈ −190,8 ± 108,4 Elo (LOS 0 %)**, 0 forfait au temps.
+- Répartition **par couleur équilibrée** : BB Blancs 23,3 %, BB Noirs 26,7 %
+  (contre 46 % / 4 % sur le match précédent depuis startpos) → **le biais
+  d'ouverture est corrigé**.
+
+**Interprétation** : le score externe ne progresse pas de façon démontrable
+(25,0 % vs 21,7 % historique §26 ; IC à n=30 de ±108 Elo). Les gains self‑play de
+D3 (+22) et D5 (+50, `PASS`) **ne se confirment pas en externe à cet
+échantillon** — soit l'effet réel est plus faible, soit 30 parties ne peuvent pas
+résoudre ~+50 Elo (il faudrait ~300 parties, ≈ 7 h à 1+1). C'est le schéma
+récurrent du projet : **ne jamais conclure sur un match court** ; le SPRT long
+reste le seul juge exploitable.
