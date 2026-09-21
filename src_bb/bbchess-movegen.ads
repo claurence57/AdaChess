@@ -53,6 +53,15 @@ package BBChess.Movegen is
    -- Fill Moves with the legal tactical moves only (captures, en passant,
    -- promotions). Cheaper than the full generator: used by quiescence.
 
+   procedure Generate_Legal_Tactical_Moves
+     (Position : in Position_Type;
+      Moves    : out Move_List;
+      Count    : out Natural;
+      Not_In_Check : in Boolean);
+   -- Same, but the caller asserts the side to move is not in check, so the
+   -- generator skips the check-detection lookup. Callers must have actually
+   -- established it (an incorrect guess would generate illegal evasions).
+
    function King_In_Check (Position : in Position_Type; Color : in Color_Type)
      return Boolean;
    -- True when the king of the given color is attacked by the opponent.

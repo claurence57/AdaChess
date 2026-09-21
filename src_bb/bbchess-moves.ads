@@ -55,6 +55,10 @@ package BBChess.Moves is
          Key             : Bitboard := 0;
          Material        : Integer := 0;
       end record;
+   --  Make_Move assigns every field of Undo before returning and Unmake_Move
+   --  only reads it afterwards, so the per-object default initialization of
+   --  this 36-byte record is pure overhead on the hot search path.
+   pragma Suppress_Initialization (Undo_Info);
 
    procedure Make_Move
      (Position : in out Position_Type;

@@ -398,24 +398,35 @@ package body BBChess.Search is
       Ctx.Start_Time := Clock;
    end Init_Context;
 
+   -- The node counter increment and checkpoint test are on the hot path
+   -- (one call per search / quiescence node); the rare branch that actually
+   -- checks the stop flags and the clock lives in this separate out-of-line
+   -- procedure so Poll_Time stays small enough to inline. Same arithmetic and
+   -- same exceptions as before, only the layout changed.
+   procedure Poll_Time_Slow (Ctx : in Context_Access) is
+   begin
+      Ctx.Next_Checkpoint := Ctx.Nodes_Count + Check_Interval;
+      if Stop_Search or else Abort_Request then
+         raise Search_Interrupted;
+      end if;
+      if Ctx.Time_Limit_Armed
+        and then To_Duration (Clock - Ctx.Start_Time) >= Ctx.Time_Budget
+      then
+         raise Search_Interrupted;
+      end if;
+      if Ctx.Node_Limit > 0 and then Ctx.Nodes_Count >= Ctx.Node_Limit then
+         raise Search_Interrupted;
+      end if;
+   end Poll_Time_Slow;
+
    procedure Poll_Time (Ctx : in Context_Access) is
    begin
       Ctx.Nodes_Count := Ctx.Nodes_Count + 1;
       if Ctx.Nodes_Count >= Ctx.Next_Checkpoint then
-         Ctx.Next_Checkpoint := Ctx.Nodes_Count + Check_Interval;
-         if Stop_Search or else Abort_Request then
-            raise Search_Interrupted;
-         end if;
-         if Ctx.Time_Limit_Armed
-           and then To_Duration (Clock - Ctx.Start_Time) >= Ctx.Time_Budget
-         then
-            raise Search_Interrupted;
-         end if;
-         if Ctx.Node_Limit > 0 and then Ctx.Nodes_Count >= Ctx.Node_Limit then
-            raise Search_Interrupted;
-         end if;
+         Poll_Time_Slow (Ctx);
       end if;
    end Poll_Time;
+   pragma Inline (Poll_Time);
 
    -------------------------------
    -- Move ordering helpers --
@@ -840,8 +851,11 @@ package body BBChess.Search is
          Generate_Legal_Moves (Position, Moves, Count);
       else
          -- Only captures / promotions are searched in a quiet position, so
-         -- there is no need to generate the (numerous) quiet moves.
-         Generate_Legal_Tactical_Moves (Position, Moves, Count);
+         -- there is no need to generate the (numerous) quiet moves. In_Check
+         -- is already known to be False here, so the generator is told to skip
+         -- the check-detection lookup it would otherwise repeat.
+         Generate_Legal_Tactical_Moves (Position, Moves, Count,
+                                        Not_In_Check => True);
       end if;
 
       if Count = 0 and then In_Check then

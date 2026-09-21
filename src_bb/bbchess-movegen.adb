@@ -406,7 +406,8 @@ begin
       Moves    : out Move_List;
       Count    : out Natural;
       Tactical : in Boolean;
-      In_Check : out Boolean)
+      In_Check : out Boolean;
+      Known_Not_In_Check : in Boolean := False)
    is
       P_Count  : Natural;
       King_First : Natural;
@@ -414,7 +415,15 @@ begin
       Opp      : constant Color_Type := Opposite (Side);
       Occ      : constant Bitboard := Occupancy (Position);
       King_Sq  : constant Square_Type := King_Square (Position, Side);
-      Checkers : constant Bitboard := Attackers_To (Position, King_Sq, Opp);
+      -- The caller may already know the side is not in check (quiescence
+      -- tests it at node entry). Recomputing Attackers_To there would repeat
+      -- the same two PEXT lookups for nothing, so it is skipped: no checker
+      -- means Checkers = 0 and In_Check = False, which is exactly what the
+      -- full computation would produce.
+      Checkers : constant Bitboard :=
+        (if Known_Not_In_Check
+         then 0
+         else Attackers_To (Position, King_Sq, Opp));
       Pinned   : constant Bitboard := Pin_Mask (Position, Side);
       -- Squares a non-king move must reach to resolve a check (all squares
       -- when there is no check).
@@ -556,6 +565,18 @@ begin
    begin
       Generate_Legal_Common (Position, Moves, Count,
                              Tactical => True, In_Check => In_Check);
+   end Generate_Legal_Tactical_Moves;
+
+   procedure Generate_Legal_Tactical_Moves
+     (Position : in Position_Type;
+      Moves    : out Move_List;
+      Count    : out Natural;
+      Not_In_Check : in Boolean) is
+      In_Check : Boolean;
+   begin
+      Generate_Legal_Common (Position, Moves, Count,
+                             Tactical => True, In_Check => In_Check,
+                             Known_Not_In_Check => Not_In_Check);
    end Generate_Legal_Tactical_Moves;
 
 end BBChess.Movegen;
