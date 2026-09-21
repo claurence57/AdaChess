@@ -43,11 +43,12 @@ TUNABLE = [
 ]
 
 # Pruning margins + LMR log constants only; structural switches (Max_Q_Depth,
-# check-extension, History_Max, Null_Red_Div) are deliberately NOT tuned.
+# check-extension, History_Max, Null_Red_Div) and large ordering-score constants
+# (Counter_Score) are deliberately NOT tuned.
 TUNABLE_SEARCH = [
     "S_FUTILITY_MARGIN", "S_FUTILITY_BASE", "S_RAZOR_MARGIN",
     "S_ASPIRATION_WINDOW", "S_DELTA_MARGIN", "S_NULL_RED_BASE",
-    "S_LMP_BASE", "S_LMP_QUAD", "S_COUNTER_SCORE",
+    "S_LMP_BASE", "S_LMP_QUAD",
     "S_CONT_HISTORY_WEIGHT", "S_LMR_BASE", "S_LMR_DIVISOR",
 ]
 
@@ -120,9 +121,8 @@ def main() -> int:
     ap.add_argument("--binary", default=str(ROOT / "bin_bb" / "adachess_bb"))
     ap.add_argument("--out", default="/tmp/opencode/spsa")
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--a", type=float, default=200.0,
-                    help="SPSA a_k numerator (step size); the old hard-coded 6 "
-                         "was ~30-100x too small versus integer rounding")
+    ap.add_argument("--a", type=float, default=0.3,
+                    help="SPSA gain (fraction of each parameter's own step size)")
     ap.add_argument("--a-offset", type=float, default=10.0,
                     help="SPSA a_k denominator offset")
     ap.add_argument("--search-only", action="store_true",
@@ -196,7 +196,7 @@ def main() -> int:
                            work, args.seed + k)
             moved = 0.0
             for p in theta:
-                grad = (r - 0.5) * delta[p] / ck[p]
+                grad = (r - 0.5) * delta[p] * c0[p]
                 theta[p] = min(float(hi[p]),
                                max(float(lo[p]), theta[p] + ak * grad))
                 moved = max(moved, abs(theta[p] - start[p]))
