@@ -105,4 +105,59 @@ package BBChess.Search is
    procedure Reset_Nodes;
    -- Reset the node counter (benchmarking).
 
+   ---------------------------------
+   -- Tunable search parameters --
+   ---------------------------------
+
+   -- The scalar search constants are held in these tables so the SPSA tuner
+   -- can override them by name at run time, following the same interface as
+   -- the evaluation parameters (Set / Load / Dump below, "--params" file).
+   -- The defaults equal the former hard-coded constants exactly, so an
+   -- unmodified run is bit-identical.
+
+   -- Integer margins / ordering scores.
+   type Search_Param_Id is
+     (S_Futility_Margin,
+      S_Futility_Base,
+      S_Razor_Margin,
+      S_Aspiration_Window,
+      S_Delta_Margin,
+      S_Max_Q_Depth,
+      S_Null_Red_Base,
+      S_Null_Red_Div,
+      S_Lmp_Base,
+      S_Lmp_Quad,
+      S_Check_Ext_Min_Depth,
+      S_Check_Ext_Ply_Guard,
+      S_Counter_Score,
+      S_Cont_History_Weight,
+      S_History_Max);
+
+   type Search_Param_Array is array (Search_Param_Id) of Integer;
+
+   -- Real constants of the late-move-reduction log formula
+   -- R = Lmr_Base + Log(depth) * Log(move) / Lmr_Divisor.
+   type Search_Real_Param_Id is
+     (S_Lmr_Base,
+      S_Lmr_Divisor);
+
+   type Search_Real_Param_Array is array (Search_Real_Param_Id) of Float;
+
+   procedure Set_Search_Param (Name : in String; Value : in Integer);
+   -- Override one integer search parameter by name ("S_FUTILITY_BASE 120").
+   -- An unknown name is ignored; the LMR table is rebuilt when needed.
+
+   procedure Set_Search_Real_Param (Name : in String; Value : in Float);
+   -- Override one real search parameter by name ("S_LMR_DIVISOR 2.25").
+
+   procedure Load_Search_Params (File_Name : in String);
+   -- Read "Name Value" lines (same format as the evaluation parameters) and
+   -- apply every integer / real search parameter found. An unreadable file
+   -- is reported and ignored.
+
+   procedure Dump_Search_Params;
+   -- Print every search parameter as "NAME value", one per line (the same
+   -- two-column format as the evaluation-parameter dump, so the tuner's
+   -- "--dump-params" parser reads them unchanged).
+
 end BBChess.Search;

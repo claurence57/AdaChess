@@ -687,12 +687,15 @@ procedure AdaChess_BB is
    end Run_Eval_Fens;
 
 begin
-   -- Optional evaluation parameter file (applies to every mode).
+   -- Optional parameter file (evaluation and search parameters; applies to
+   -- every mode). The same file may mix "P_*" (eval) and "S_*" (search)
+   -- names, so both loaders read it.
    for I in 1 .. Ada.Command_Line.Argument_Count loop
       if Ada.Command_Line.Argument (I) = "--params"
         and then I < Ada.Command_Line.Argument_Count
       then
          Load_Params (Ada.Command_Line.Argument (I + 1));
+         Load_Search_Params (Ada.Command_Line.Argument (I + 1));
       end if;
    end loop;
 
@@ -735,11 +738,12 @@ begin
       end if;
    end loop;
 
-   -- Dump the current evaluation parameters.
+   -- Dump the current evaluation and search parameters.
    if Ada.Command_Line.Argument_Count >= 1
      and then Ada.Command_Line.Argument (1) = "--dump-params"
    then
       Dump_Params;
+      Dump_Search_Params;
       return;
    end if;
 

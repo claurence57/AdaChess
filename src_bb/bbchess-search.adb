@@ -18,6 +18,8 @@ with Ada.Real_Time;
 use Ada.Real_Time;
 
 with Ada.Text_IO;
+with Ada.IO_Exceptions;
+with Ada.Characters.Handling;
 
 with Ada.Numerics.Elementary_Functions;
 
@@ -51,17 +53,90 @@ package body BBChess.Search is
    Check_Interval : constant := 1024;
    Max_Ply        : constant := 128;
 
-   -- Delta pruning margin (quiescence): a capture whose victim plus this
-   -- margin cannot reach alpha is not searched.
-   Delta_Margin : constant Score_Type := 200;
+   -- Tunable search parameters (declared in the spec, see the Set / Load /
+   -- Dump interface). The defaults are exactly the former hard-coded
+   -- constants, so an unmodified run is bit-identical.
+   Search_Params : Search_Param_Array :=
+     (S_Futility_Margin      => 180,
+      S_Futility_Base        => 120,
+      S_Razor_Margin         => 300,
+      S_Aspiration_Window    => 40,
+      S_Delta_Margin         => 200,
+      S_Max_Q_Depth          => 8,
+      S_Null_Red_Base        => 3,
+      S_Null_Red_Div         => 4,
+      S_Lmp_Base             => 4,
+      S_Lmp_Quad             => 1,
+      S_Check_Ext_Min_Depth  => 1,
+      S_Check_Ext_Ply_Guard  => 4,
+      S_Counter_Score        => 800_000,
+      S_Cont_History_Weight  => 6,
+      S_History_Max          => 16_384);
 
-   -- Quiescence depth bound: a quiet (non-check) node at this many quiescence
-   -- plies stops expanding and returns the alpha-updated stand-pat score. At
-   -- the cap an in-check node still generates its evasions to detect mate, but
-   -- it cannot recurse, so its non-mate value is only a fail-low bound (never a
-   -- trusted static score). Mates within the cap and all-check mates are
-   -- guaranteed; a non-checking mate beyond the cap is not.
-   Max_Q_Depth : constant := 8;
+   Search_Real_Params : Search_Real_Param_Array :=
+     (S_Lmr_Base     => 0.75,
+      S_Lmr_Divisor  => 2.25);
+
+   -- Allowed ranges: Set_Search_Param clamps a tuned value to them. The
+   -- integer ranges also keep the arithmetic below (margins multiplied by the
+   -- depth, quiescence depth, ordering scores) well inside a 32-bit Integer.
+   Search_Param_Min : constant Search_Param_Array :=
+     (S_Futility_Margin      => -32_000,
+      S_Futility_Base        => -32_000,
+      S_Razor_Margin         => -32_000,
+      S_Aspiration_Window    => 0,
+      S_Delta_Margin         => 0,
+      S_Max_Q_Depth          => 0,
+      S_Null_Red_Base        => 0,
+      S_Null_Red_Div         => 1,
+      S_Lmp_Base             => 0,
+      S_Lmp_Quad             => 0,
+      S_Check_Ext_Min_Depth  => 0,
+      S_Check_Ext_Ply_Guard  => 0,
+      S_Counter_Score        => 0,
+      S_Cont_History_Weight  => 0,
+      S_History_Max          => 0);
+
+   Search_Param_Max : constant Search_Param_Array :=
+     (S_Futility_Margin      => 32_000,
+      S_Futility_Base        => 32_000,
+      S_Razor_Margin         => 32_000,
+      S_Aspiration_Window    => 32_000,
+      S_Delta_Margin         => 32_000,
+      S_Max_Q_Depth          => 128,
+      S_Null_Red_Base        => 128,
+      S_Null_Red_Div         => 128,
+      S_Lmp_Base             => 256,
+      S_Lmp_Quad             => 8,
+      S_Check_Ext_Min_Depth  => 4,
+      S_Check_Ext_Ply_Guard  => 64,
+      S_Counter_Score        => 799_999,
+      S_Cont_History_Weight  => 1_024,
+      S_History_Max          => 1_000_000);
+
+   -- Named constants used by the rest of the search (the former hard-coded
+   -- constants, now renames of the parameter table entries).
+   Delta_Margin        : Score_Type
+     renames Search_Params (S_Delta_Margin);
+   Max_Q_Depth         : Score_Type
+     renames Search_Params (S_Max_Q_Depth);
+   Futility_Margin     : Score_Type
+     renames Search_Params (S_Futility_Margin);
+   Futility_Base       : Score_Type
+     renames Search_Params (S_Futility_Base);
+   Razor_Margin        : Score_Type
+     renames Search_Params (S_Razor_Margin);
+   Aspiration_Window   : Score_Type
+     renames Search_Params (S_Aspiration_Window);
+   Cont_History_Weight : Score_Type
+     renames Search_Params (S_Cont_History_Weight);
+   History_Max         : Score_Type
+     renames Search_Params (S_History_Max);
+
+   -- The LMR log-formula constants are read when the table is (re)built.
+   LMR_Base    : Float renames Search_Real_Params (S_Lmr_Base);
+   LMR_Divisor : Float renames Search_Real_Params (S_Lmr_Divisor);
+
 
    ---------------
    -- TT helpers --
@@ -368,13 +443,8 @@ package body BBChess.Search is
    end Is_Tactical;
    pragma Inline (Is_Tactical);
 
-   History_Max : constant Score_Type := 16_384;
-
-   -- Weight of the 1-ply continuation history in the quiet-move score. The
-   -- continuation table is keyed on the actual previous move, so it is a more
-   -- selective predictor than the plain (side, from, to) history; weighting it
-   -- up is what turns the combined ordering into a consistent node reduction.
-   Cont_History_Weight : constant Score_Type := 6;
+   -- History_Max and Cont_History_Weight are tunable search parameters
+   -- (renames of Search_Params).
 
    --  Scratch arrays used by the movers. They are written for every move in
    --  1 .. Count before the corresponding entry is read, so the per-call
@@ -499,7 +569,7 @@ package body BBChess.Search is
          if Prev /= Empty_Move
            and then Move = Ctx.Counter (Color (Prev.Piece), Prev.From, Prev.To)
          then
-            return 800_000;
+            return Search_Params (S_Counter_Score);
          end if;
       end if;
 
@@ -881,45 +951,35 @@ package body BBChess.Search is
    -- Negamax --
    -------------
 
-   -- Reverse futility margin at depth 1.
-   Futility_Margin : constant Score_Type := 180;
-
-   -- Futility pruning: a quiet move is not searched when the static eval
-   -- plus this margin (scaled by the depth) is still below alpha.
-   Futility_Base : constant Score_Type := 120;
-
-   -- Razoring: below alpha by this margin (scaled by the depth) the node is
-   -- resolved by a quiescence search instead of the full-width search.
-   Razor_Margin : constant Score_Type := 300;
-
-   -- Aspiration window around the previous iteration score (centipawns).
-   Aspiration_Window : constant Score_Type := 40;
+   -- Futility_Margin, Futility_Base, Razor_Margin and Aspiration_Window are
+   -- tunable search parameters (renames of Search_Params, see the top of the
+   -- body and the Set / Load / Dump interface in the spec).
 
    -- Late-move reduction table: reduction applied to a late quiet move as a
    -- function of the remaining depth and the move index (both capped), from
-   -- the classic log formula, precomputed once at elaboration.
+   -- the classic log formula R = LMR_Base + Log(depth) * Log(move) /
+   -- LMR_Divisor. The table is rebuilt at elaboration and whenever a
+   -- "S_LMR_*" parameter changes, so a tuned formula is applied immediately.
    LMR_Max_Depth : constant := 64;
    LMR_Max_Move  : constant := 64;
    type LMR_Array is array (1 .. LMR_Max_Depth, 1 .. LMR_Max_Move) of Natural;
 
-   function Compute_LMR return LMR_Array is
+   LMR_Table : LMR_Array := (others => (others => 0));
+
+   procedure Rebuild_LMR is
       use Ada.Numerics.Elementary_Functions;
       R : Float;
-      T : LMR_Array := (others => (others => 0));
    begin
       for D in 1 .. LMR_Max_Depth loop
          for M in 1 .. LMR_Max_Move loop
-            R := 0.75 + Log (Float (D)) * Log (Float (M)) / 2.25;
+            R := LMR_Base + Log (Float (D)) * Log (Float (M)) / LMR_Divisor;
             if R < 0.0 then
                R := 0.0;
             end if;
-            T (D, M) := Natural (R);
+            LMR_Table (D, M) := Natural (R);
          end loop;
       end loop;
-      return T;
-   end Compute_LMR;
-
-   LMR_Table : constant LMR_Array := Compute_LMR;
+   end Rebuild_LMR;
 
    function Negamax (Ctx        : in Context_Access;
                      Position   : in out Position_Type;
@@ -1093,7 +1153,10 @@ package body BBChess.Search is
       -- Check extension: evasions are forced, so an in-check node is
       -- searched one ply deeper than a quiet one. Bounded by Ply so that a
       -- long checking sequence cannot explode the search.
-      if In_Check and then Depth >= 1 and then Ply <= Max_Ply - 4 then
+      if In_Check and then Depth >= Natural (Search_Params (S_Check_Ext_Min_Depth))
+        and then Ply <= Max_Ply
+          - Search_Params (S_Check_Ext_Ply_Guard)
+      then
          Child_Depth := Depth;
       else
          Child_Depth := Depth - 1;
@@ -1119,7 +1182,9 @@ package body BBChess.Search is
             Saved_Key  : constant Bitboard := Position.Key;
             -- Standard adaptive null-move reduction: deeper nodes get a
             -- larger reduction (R = 3 + Depth / 4, integer division).
-            N_Reduction : constant Natural := 3 + Depth / 4;
+            N_Reduction : constant Natural :=
+              Search_Params (S_Null_Red_Base)
+              + Depth / Natural (Search_Params (S_Null_Red_Div));
             N_Depth     : Natural;
             N_Score    : Score_Type;
          begin
@@ -1210,11 +1275,12 @@ package body BBChess.Search is
                -- Late move pruning: at low depth the late quiet moves are
                -- simply skipped (they are ordered last and almost never
                -- improve on the already searched moves).
-               if not In_Check and then not Tactical
-                 and then Depth <= 3
-                 and then Best_Score > -Mate_Threshold
-                 and then I > 4 + Depth * Depth
-               then
+                if not In_Check and then not Tactical
+                  and then Depth <= 3
+                  and then Best_Score > -Mate_Threshold
+                  and then I > Search_Params (S_Lmp_Base)
+                    + Search_Params (S_Lmp_Quad) * Depth * Depth
+                then
                   goto Next_Move;
                end if;
 
@@ -1584,6 +1650,114 @@ package body BBChess.Search is
       Accum_Nodes := 0;
    end Reset_Nodes;
 
+   -----------------------------
+   -- Tunable search params --
+   -----------------------------
+
+   procedure Set_Search_Param (Name : in String; Value : in Integer) is
+      use Ada.Characters.Handling;
+      U : constant String := To_Upper (Name);
+   begin
+      for Id in Search_Param_Id loop
+         if U = Search_Param_Id'Image (Id) then
+            if Value < Search_Param_Min (Id) then
+               Search_Params (Id) := Search_Param_Min (Id);
+            elsif Value > Search_Param_Max (Id) then
+               Search_Params (Id) := Search_Param_Max (Id);
+            else
+               Search_Params (Id) := Value;
+            end if;
+            return;
+         end if;
+      end loop;
+   end Set_Search_Param;
+
+   procedure Set_Search_Real_Param (Name : in String; Value : in Float) is
+      use Ada.Characters.Handling;
+      U : constant String := To_Upper (Name);
+   begin
+      for Id in Search_Real_Param_Id loop
+         if U = Search_Real_Param_Id'Image (Id) then
+            Search_Real_Params (Id) := Value;
+            -- The reduction table depends on the real constants, so rebuild
+            -- it immediately rather than at the next elaboration.
+            Rebuild_LMR;
+            return;
+         end if;
+      end loop;
+   end Set_Search_Real_Param;
+
+   procedure Load_Search_Params (File_Name : in String) is
+      F    : Ada.Text_IO.File_Type;
+      Line : String (1 .. 256);
+      Last : Natural;
+   begin
+      Ada.Text_IO.Open (F, Ada.Text_IO.In_File, File_Name);
+      while not Ada.Text_IO.End_Of_File (F) loop
+         Ada.Text_IO.Get_Line (F, Line, Last);
+         declare
+            S        : constant String := Line (1 .. Last);
+            I        : Natural := S'First;
+            Name_End : Natural;
+         begin
+            while I <= S'Last and then S (I) = ' ' loop
+               I := I + 1;
+            end loop;
+            Name_End := I;
+            while Name_End <= S'Last and then S (Name_End) /= ' ' loop
+               Name_End := Name_End + 1;
+            end loop;
+            if Name_End > I then
+               declare
+                  Name   : constant String := S (I .. Name_End - 1);
+                  VStart : Natural := Name_End;
+               begin
+                  while VStart <= S'Last and then S (VStart) = ' ' loop
+                     VStart := VStart + 1;
+                  end loop;
+                  if VStart <= S'Last then
+                     declare
+                        V : constant String := S (VStart .. S'Last);
+                     begin
+                        -- Integer parameters are the common case; a real
+                        -- parameter (fractional value) fails Integer'Value
+                        -- and is applied by the real setter.
+                        begin
+                           Set_Search_Param (Name, Integer'Value (V));
+                        exception
+                           when Constraint_Error =>
+                              begin
+                                 Set_Search_Real_Param (Name, Float'Value (V));
+                              exception
+                                 when Constraint_Error => null;
+                              end;
+                        end;
+                     end;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+      Ada.Text_IO.Close (F);
+   exception
+      when Ada.IO_Exceptions.Name_Error =>
+         Ada.Text_IO.Put_Line
+           ("warning: cannot open params file " & File_Name);
+   end Load_Search_Params;
+
+   procedure Dump_Search_Params is
+   begin
+      for Id in Search_Param_Id loop
+         Ada.Text_IO.Put_Line
+           (Search_Param_Id'Image (Id) & " " & Integer'Image (Search_Params (Id)));
+      end loop;
+      for Id in Search_Real_Param_Id loop
+         Ada.Text_IO.Put_Line
+           (Search_Real_Param_Id'Image (Id) & " "
+            & Float'Image (Search_Real_Params (Id)));
+      end loop;
+   end Dump_Search_Params;
+
    -----------------
    -- Best_Move (fixed depth) --
    -----------------
@@ -1812,5 +1986,10 @@ package body BBChess.Search is
    begin
       return Best_Move_Impl (Position, Max_Depth, Time_Alloc, Time_Alloc, 0);
    end Best_Move;
+
+begin
+   -- Precompute the late-move reduction table from the default real
+   -- parameters (rebuilt by Set_Search_Real_Param when they are tuned).
+   Rebuild_LMR;
 
 end BBChess.Search;
