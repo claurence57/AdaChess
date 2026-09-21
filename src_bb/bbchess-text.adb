@@ -111,4 +111,39 @@ package body BBChess.Text is
       return S (Lo .. Hi);
    end Trim_Both;
 
+   function Thread_Count (Argument : in String; Default : in Natural)
+     return Natural
+   is
+      Dig : String (1 .. Argument'Length);
+      Last   : Natural := 0;
+   begin
+      if Argument'Length > 2
+        and then Argument (Argument'First .. Argument'First + 1) = "-T"
+      then
+         Dig (1 .. Argument'Length - 2) :=
+           Argument (Argument'First + 2 .. Argument'Last);
+         Last := Argument'Length - 2;
+      elsif Argument'Length > 8
+        and then Argument (Argument'First .. Argument'First + 7) = "--thread"
+        and then Argument (Argument'First + 8) = '='
+      then
+         Dig (1 .. Argument'Length - 9) :=
+           Argument (Argument'First + 9 .. Argument'Last);
+         Last := Argument'Length - 9;
+      else
+         return Default;
+      end if;
+
+      for I in 1 .. Last loop
+         if Dig (I) not in '0' .. '9' then
+            return Default;
+         end if;
+      end loop;
+
+      return Natural'Value (Dig (1 .. Last));
+   exception
+      when Constraint_Error =>
+         return Default;
+   end Thread_Count;
+
 end BBChess.Text;

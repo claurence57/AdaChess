@@ -45,4 +45,11 @@ package BBChess.Text is
    function Trim_Both (S : in String) return String;
    -- Trim spaces/tabs at both ends.
 
+   function Thread_Count (Argument : in String; Default : in Natural)
+     return Natural;
+   -- Thread count parsed from a single command-line argument: "-TN" or
+   -- "--thread=N". Returns Default (0 means "no match") when Argument is
+   -- neither form or the value is malformed. The two-argument form
+   -- ("--threads N") is resolved by the caller.
+
 end BBChess.Text;

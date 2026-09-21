@@ -725,17 +725,24 @@ begin
       end if;
    end loop;
 
-   -- Optional number of search threads (Lazy SMP).
+   -- Optional number of search threads (Lazy SMP): "--threads N" (separate
+   -- argument), "-TN" or "--thread=N" (same argument).
    for I in 1 .. Ada.Command_Line.Argument_Count loop
-      if Ada.Command_Line.Argument (I) = "--threads"
-        and then I < Ada.Command_Line.Argument_Count
-      then
-         begin
+      declare
+         A : constant String := Ada.Command_Line.Argument (I);
+         N : Natural := BBChess.Text.Thread_Count (A, 0);
+      begin
+         if A = "--threads"
+           and then I < Ada.Command_Line.Argument_Count
+         then
             Set_Threads (Natural'Value (Ada.Command_Line.Argument (I + 1)));
-         exception
-            when Constraint_Error => Set_Threads (1);
-         end;
-      end if;
+         elsif N /= 0 then
+            Set_Threads (N);
+         end if;
+      exception
+         when Constraint_Error =>
+            Set_Threads (1);
+      end;
    end loop;
 
    -- Dump the current evaluation and search parameters.
@@ -809,7 +816,7 @@ begin
 
           elsif Cmd = "uci" then
              UCI_Mode := True;
-             Ada.Text_IO.Put_Line ("id name AdaChess-BB 1.0");
+             Ada.Text_IO.Put_Line ("id name AdaChess-BB 2.0");
              Ada.Text_IO.Put_Line ("id author AdaChess");
              Ada.Text_IO.Put_Line
                ("option name Hash type spin default 64 min 1 max 1024");
@@ -883,7 +890,7 @@ begin
              end if;
 
           elsif Cmd = "protover" then
-             Ada.Text_IO.Put_Line ("feature myname=""AdaChess-BB 1.0""");
+             Ada.Text_IO.Put_Line ("feature myname=""AdaChess-BB 2.0""");
             Ada.Text_IO.Put_Line ("feature setboard=1");
             Ada.Text_IO.Put_Line ("feature ping=1");
             Ada.Text_IO.Put_Line ("feature memory=1");

@@ -726,7 +726,17 @@ package body BBChess.Self_Tests is
 
       Ada.Text_IO.Put_Line ("long-token handling OK");
 
+      -- Thread arguments: -T#, --thread=#, and the malformed fallbacks.
+      Assert (Thread_Count ("-T4", 0) = 4, "-T4");
+      Assert (Thread_Count ("-T1", 0) = 1, "-T1");
+      Assert (Thread_Count ("--thread=8", 0) = 8, "--thread=8");
+      Assert (Thread_Count ("-T", 0) = 0, "-T without digits");
+      Assert (Thread_Count ("-Tx", 0) = 0, "-Tx is not a count");
+      Assert (Thread_Count ("--thread=", 0) = 0, "--thread= without digits");
+      Assert (Thread_Count ("--threads", 0) = 0, "--threads needs a value");
+      Assert (Thread_Count ("-T12", 0) = 12, "two-digit -T12");
+      Ada.Text_IO.Put_Line ("thread argument parsing OK");
+
       Ada.Text_IO.Put_Line ("all self tests OK");
    end Run;
-
 end BBChess.Self_Tests;
