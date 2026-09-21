@@ -1831,3 +1831,31 @@ D3 (+22) et D5 (+50, `PASS`) **ne se confirment pas en externe à cet
 résoudre ~+50 Elo (il faudrait ~300 parties, ≈ 7 h à 1+1). C'est le schéma
 récurrent du projet : **ne jamais conclure sur un match court** ; le SPRT long
 reste le seul juge exploitable.
+
+---
+
+## 43. Constantes de recherche exposées (D4) + SPSA recherche (D4b)
+
+**D4 — 17 constantes de recherche rendues tunables** (`bbchess-search.adb`,
+`adachess_bb.adb`) via le mécanisme existant `--params` / `--dump-params` (même
+patron que l'éval : énumération + tableau + `Set` + `Dump`) : marges
+futilité/razoring, fenêtre d'aspiration, delta quiescence, `Max_Q_Depth`, base et
+diviseur de la réduction null adaptative, LMP base/quad, garde d'extension
+d'échec, score counter‑move, poids continuation‑history, borne history, et les
+**deux constantes réelles** de la formule LMR (table reconstruite au changement).
+
+- **Défauts bit‑identiques** : `--bench 9/11` = **496 570 / 1 434 292** sans
+  params **et** avec un dump complet des défauts ; `--selftest`/perft/`portable`
+  verts. Preuve que les params sont **réellement câblés** : changer une marge
+  change le nombre de nœuds.
+
+**D4b — outillage SPSA étendu et corrigé** (`scripts/spsa.py`) : lecture des
+réels (`S_LMR_BASE 7.5E-01`) sans planter, mode `--search-only` (marges + LMR,
+hors commutateurs structurels et `Counter_Score`), et **pas normalisé par
+l'échelle** — le gain était calibré pour l'éval (magnitude ~100) et envoyait
+`S_LMP_QUAD`/`S_NULL_RED_BASE` aux bornes en une itération ; perturbation et mise
+à jour sont désormais proportionnelles au pas propre de chaque paramètre.
+
+Campagne `--search-only` (24 iter × 80 part. à 0,5+0,05) : **θ reste stable**
+au voisinage des défauts (vérifié sur sonde). Le résultat de la campagne et sa
+validation SPRT longue sont consignés au §44.

@@ -10,6 +10,16 @@
 > *Sisyphus* / OhMyOpenCode) et des **interfaces web**. Voir `DEVELOPMENT.md`
 > (note en tête et §11).
 
+### Recherche — 17 constantes exposées en params + tuning SPSA (D4/D4b)
+
+- Marges de recherche (futilité, razoring, aspiration, delta, null, LMP, garde
+  d'extension d'échec), ordonnancement (counter‑move, continuation‑history,
+  history) et constantes LMR exposées via `--params`/`--dump-params` ; **défauts
+  bit‑identiques** (`--bench 9/11` = 496 570/1 434 292).
+- `scripts/spsa.py` lit les réels, gagne `--search-only`, et ses pas sont
+  **normalisés par l'échelle** (corrige une divergence aux bornes). Voir
+  `DEVELOPMENT.md` §43.
+
 ### Gestion du temps — séparation soft/hard
 
 - Nouveau module pur `BBChess.Clocks` : `soft = restant/movestogo + 0,75×inc`,
