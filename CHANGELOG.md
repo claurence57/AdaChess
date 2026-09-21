@@ -29,6 +29,15 @@
   `release` propres. Scalabilité mesurée : 1,59× à 2 threads, 1,94× à 4,
   plateau à 8 (pas de régression).
 
+### Performance — optimisation CPU #7 (arbre identique)
+
+- `Poll_Time` scindé (test par nœud inliné, contrôles hors ligne),
+  `Generate_Legal_Tactical_Moves` saute un test d'échec redondant,
+  `Suppress_Initialization (Undo_Info)`.
+- A/B bench 11 : **instructions −0,81 %, cycles −1,47 %** ; nœuds
+  **496 570 / 1 434 292** exacts, éval byte-identique, `--selftest`/`portable`
+  verts. Voir `DEVELOPMENT.md` §46.
+
 ### Recherche — 17 constantes exposées en params + tuning SPSA (D4/D4b)
 
 - Marges de recherche (futilité, razoring, aspiration, delta, null, LMP, garde

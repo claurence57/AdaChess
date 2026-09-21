@@ -1968,3 +1968,26 @@ binaire d'origine (`--bench 9/11` = **496 570 / 1 434 292** exactement),
 profondeur 14 sur ≥ 5 positions × 3 répétitions : aucun plantage/blocage ; build
 `debug` (contrôles actifs) : 3 000 recherches avec effectif cyclé 1→8, sans
 erreur bornée (valide la libération des tâches).
+
+---
+
+## 46. Optimisation CPU #7 (×1,01) — adoptée
+
+Septième passe de profilage/optimisation, toujours **sans changement de
+comportement** (`--bench 9/11` = **496 570 / 1 434 292** exacts, éval
+**byte-identique** sur 41 diag + 12 000 positions aléatoires, bestmoves
+identiques d8/d10, `portable` vert).
+
+- **`Poll_Time` scindé** : incrément de compteur et test de point de contrôle
+  inlinés par nœud ; les contrôles d'arrêt/horloge passent dans un
+  `Poll_Time_Slow` hors ligne (mêmes opérations, mêmes exceptions).
+- **`Generate_Legal_Tactical_Moves`** : la quiescence connaît `In_Check = False`,
+  donc `Generate_Legal_Common` saute un `Attackers_To` redondant (2 PEXT).
+- **`pragma Suppress_Initialization (Undo_Info)`** : `Make_Move` affecte tous les
+  champs avant retour.
+
+**Mesure** (A/B entrelacé, min de 31 répétitions, bench 11) : instructions
+**3,892 G → 3,861 G (−0,81 %)**, cycles **1,819 G → 1,792 G (−1,47 %)**. Gain
+modeste : le moteur approche l'épuisement des micro-optimisations sûres (le
+`Negamax` reste ~39 %, dominé par les accès mémoire au TT, déjà largement
+optimisés aux §33/§36-37).
