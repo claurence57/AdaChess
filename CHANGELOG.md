@@ -19,6 +19,9 @@
 - `scripts/spsa.py` lit les réels, gagne `--search-only`, et ses pas sont
   **normalisés par l'échelle** (corrige une divergence aux bornes). Voir
   `DEVELOPMENT.md` §43.
+- **Campagne SPSA recherche (24×80) : neutre** — θ quasi inchangé (< 1 %), et
+  `SPRT 500 : +2,1 ± 20,8 Elo, LOS 58 %`. Bug de format corrigé (les marges
+  entières écrites en flottant étaient ignorées). Voir `DEVELOPMENT.md` §44.
 
 ### Gestion du temps — séparation soft/hard
 

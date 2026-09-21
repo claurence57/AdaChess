@@ -1859,3 +1859,32 @@ l'échelle** — le gain était calibré pour l'éval (magnitude ~100) et envoya
 Campagne `--search-only` (24 iter × 80 part. à 0,5+0,05) : **θ reste stable**
 au voisinage des défauts (vérifié sur sonde). Le résultat de la campagne et sa
 validation SPRT longue sont consignés au §44.
+
+---
+
+## 44. SPSA sur les constantes de recherche (D4b) — neutre
+
+Campagne `--search-only` : **24 itérations × 80 parties** (0,5+0,05). Après
+24 itérations, θ n'a quasi **pas bougé** (< 1 % des défauts) : `S_FUTILITY_MARGIN`
+180 → 179,8 ; `S_LMP_QUAD` 1 → 1,25 ; `S_CONT_HISTORY_WEIGHT` 6 → 6,02. C'est la
+signature d'un **gradient noyé dans le bruit** (80 parties/itération : des effets
+de quelques Elo sont indétectables), exactement comme le SPSA d'éval (§20).
+
+Après arrondi (les marges sont **entières**), seuls **4 paramètres** diffèrent
+réellement des défauts : `S_DELTA_MARGIN 200→201`, `S_FUTILITY_BASE 120→121`,
+`S_LMR_BASE 0,75→0,7507`, `S_LMR_DIVISOR 2,25→2,255` — le reste est identique.
+
+**SPRT 500 parties à 1+0,1 (params SPSA vs défauts)** : NEW 118-115-267 (50,3 %),
+**+2,1 ± 20,8 Elo, LOS 57,8 % → neutre.** (Le +58 Elo observé à 77 parties était
+du bruit qui est retombé à +2 sur 500 — rappel de ne jamais conclure tôt.)
+
+**Bug de format corrigé au passage** : `spsa.py` écrivait les paramètres
+non entiers en **flottants** (`179.845`), or le parseur Ada n'accepte que des
+entiers pour ces marges — le fichier était donc **silencieusement ignoré**
+(nœuds identiques). Seules `S_LMR_BASE`/`S_LMR_DIVISOR` sont réelles ; les autres
+sont désormais arrondies.
+
+**Conclusion** : le tuning SPSA reste **neutre** (recherche comme éval). L'apport
+durable de D4 est **l'infrastructure** (17 constantes runtime, défauts
+bit‑identiques) pour d'éventuelles campagnes futures à budget bien supérieur, et
+non un gain immédiat.
