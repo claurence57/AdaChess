@@ -27,6 +27,8 @@ with System;
 
 with Ada.Unchecked_Deallocation;
 
+with Ada.Task_Identification;
+
 with BBChess.Hash;
 use BBChess.Hash;
 
@@ -1533,6 +1535,14 @@ package body BBChess.Search is
       Work        : Position_Type := Position;
       Best        : Move_Type := Empty_Move;
       Best_Score  : Score_Type := 0;
+      --  Last *fully completed* iteration's move and score. Best/Best_Score
+      --  are updated by Root_Search as the running ordering hint, but an
+      --  aspiration re-search that is interrupted after its narrow pass has
+      --  already overwritten Best with a move scored under an unverified
+      --  bound. Only a completed iteration is allowed to be reported, so the
+      --  result is snapshotted here at completion time.
+      Done_Best   : Move_Type := Empty_Move;
+      Done_Score  : Score_Type := 0;
       Alpha       : Score_Type := -Infinity;
       Beta        : Score_Type := Infinity;
       Score       : Score_Type;
@@ -1583,6 +1593,11 @@ package body BBChess.Search is
             Best_Score := Score;
             Completed := True;
             Last_Depth := D;
+            --  Snapshot the completed iteration: a later (aspiration) iteration
+            --  that is interrupted must not leak its partial move/score into
+            --  the reported result.
+            Done_Best  := Best;
+            Done_Score := Best_Score;
             --  Duration of the iteration just completed (used to estimate
             --  whether the next one can still fit under the soft target).
             Prev_Iter := To_Duration (Clock - Ctx.Start_Time) - Elapsed;
@@ -1603,8 +1618,8 @@ package body BBChess.Search is
       end;
 
       if Completed then
-         Result.Best := Best;
-         Result.Score := Best_Score;
+         Result.Best := Done_Best;
+         Result.Score := Done_Score;
          Result.Depth := Last_Depth;
       end if;
       Result.Nodes := Ctx.Nodes_Count;
@@ -1794,7 +1809,11 @@ package body BBChess.Search is
    -------------------------
 
    Max_Threads : constant := 16;
+   --  Read by the search task when it snapshots the worker count, written by
+   --  the UCI command loop (Set_Threads) possibly while a search is running:
+   --  atomic so the snapshot never observes a torn value.
    Num_Threads : Natural := 1;
+   pragma Atomic (Num_Threads);
 
    procedure Set_Threads (N : in Natural) is
    begin
@@ -1817,18 +1836,27 @@ package body BBChess.Search is
       Abort_Request := False;
    end Clear_Stop;
 
+   --  Number of workers actually launched for the current search. It is
+   --  snapshotted from Num_Threads when the search starts (Root_Num_Threads)
+   --  and is what the barrier waits for. The UCI command loop can change
+   --  Num_Threads while a search is running (setoption Threads), and the
+   --  barrier must not wait for workers that were never created: waiting for
+   --  the *global* Num_Threads would deadlock a 4-thread search when the GUI
+   --  raises it to 8 mid-search. The next search picks up the new value.
    protected type Completion is
-      procedure Reset;
+      procedure Reset (N : in Natural);
       procedure Signal;
       entry Wait_All;
    private
       Count : Natural := 0;
+      Target : Natural := 1;
    end Completion;
 
    protected body Completion is
-      procedure Reset is
+      procedure Reset (N : in Natural) is
       begin
          Count := 0;
+         Target := N;
       end Reset;
 
       procedure Signal is
@@ -1836,7 +1864,7 @@ package body BBChess.Search is
          Count := Count + 1;
       end Signal;
 
-      entry Wait_All when Count >= Num_Threads is
+      entry Wait_All when Count >= Target is
       begin
          null;
       end Wait_All;
@@ -1849,6 +1877,11 @@ package body BBChess.Search is
    Root_Time      : Duration := 0.0;
    Root_Soft      : Duration := 0.0;
    Root_Node_Cap  : Natural := 0;
+   --  Worker count for the current search, snapshotted from Num_Threads at
+   --  launch: Set_Threads can run from the UCI command loop while the search
+   --  is in progress, and the barrier / result loop must use the count that
+   --  was actually started.
+   Root_Num_Threads : Natural := 1;
    Results        : array (1 .. Max_Threads) of Thread_Result;
 
    task type Searcher (Id : Positive);
@@ -1870,6 +1903,27 @@ package body BBChess.Search is
    end Searcher;
 
    type Searcher_Access is access Searcher;
+
+   --  The workers are heap-allocated (one task object per thread, with a
+   --  distinct discriminant) and must be reclaimed after each search: the
+   --  earlier code leaked one task object per thread and per search (~8 kB
+   --  per search at 8 threads). Freeing an active task object is a bounded
+   --  error, so the task is freed only once Ada confirms it terminated.
+   procedure Free_Searcher is new
+     Ada.Unchecked_Deallocation (Object => Searcher, Name => Searcher_Access);
+
+   procedure Reclaim_Worker (W : in out Searcher_Access) is
+   begin
+      if W /= null then
+         --  The task has signalled completion (Done.Signal) and run off the
+         --  end of its body; wait for the runtime to mark it terminated
+         --  before freeing the object it lives in.
+         while not Ada.Task_Identification.Is_Terminated (W.all'Identity) loop
+            delay 0.0;
+         end loop;
+         Free_Searcher (W);
+      end if;
+   end Reclaim_Worker;
 
    -- Shared implementation. Hard_Alloc is the interruptible deadline, Soft_Alloc
    -- the between-iteration target, Node_Cap the optional node ceiling. The
@@ -1918,28 +1972,51 @@ package body BBChess.Search is
       Root_Time := Hard_Alloc;
       Root_Soft := Soft_Alloc;
       Root_Node_Cap := Node_Cap;
-      Done.Reset;
+      -- Snapshot the worker count for this search: Set_Threads may run
+      -- concurrently from the command loop, but this search must only wait
+      -- for (and read the results of) the workers it actually starts.
+      Root_Num_Threads := Num_Threads;
+      Done.Reset (Root_Num_Threads);
 
       declare
-         Workers : array (1 .. Num_Threads) of Searcher_Access;
+         Workers : array (1 .. Root_Num_Threads) of Searcher_Access;
       begin
-         for I in 1 .. Num_Threads loop
+         for I in 1 .. Root_Num_Threads loop
             Results (I) := (Best => Empty_Move, Score => -Infinity,
                             Depth => 0, Nodes => 0);
             Workers (I) := new Searcher (I);
          end loop;
 
+         --  Wait for every worker, then reclaim the task objects. Done.Wait_All
+         --  returns once Count reaches the launched count, which is after each
+         --  worker has signalled completion (Done.Signal is the last statement
+         --  of the task body), so the tasks are terminated and safe to free.
          Done.Wait_All;
+         for I in 1 .. Root_Num_Threads loop
+            Reclaim_Worker (Workers (I));
+         end loop;
       end;
 
-      -- Node accounting and result selection (the deepest, then best score).
+      --  Node accounting for every worker, then the move selection. The
+      --  primary thread (1) owns the reported line: it is the only one whose
+      --  iteration reports are printed, and its result is the one a GUI
+      --  expects. A helper may have completed a deeper iteration on a
+      --  different (stale) score, so taking the deepest across threads can
+      --  report a move that does not match the primary's printed depth/score.
+      --  Only a *completed* iteration sets Results.Best (Iterative_Search
+      --  leaves it Empty otherwise), so an interrupted iteration can never
+      --  contribute. Primacy is a preference, not a hard rule: if the primary
+      --  has no completed result (it can be stopped before its first iteration
+      --  finishes while a helper got one), fall back to the deepest completed
+      --  result among the helpers.
       declare
          Best_Depth : Natural := 0;
          Best_Score : Score_Type := -Infinity;
       begin
-         for I in 1 .. Num_Threads loop
+         for I in 1 .. Root_Num_Threads loop
             Accum_Nodes := Accum_Nodes + Results (I).Nodes;
-            if Results (I).Best /= Empty_Move
+            if I > 1
+              and then Results (I).Best /= Empty_Move
               and then (Results (I).Depth > Best_Depth
                         or else (Results (I).Depth = Best_Depth
                                  and then Results (I).Score > Best_Score))
@@ -1949,6 +2026,11 @@ package body BBChess.Search is
                Best := Results (I).Best;
             end if;
          end loop;
+
+         --  The primary thread wins whenever it produced a move.
+         if Results (1).Best /= Empty_Move then
+            Best := Results (1).Best;
+         end if;
       end;
 
       if Best = Empty_Move then
