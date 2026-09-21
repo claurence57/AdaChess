@@ -10,6 +10,25 @@
 > *Sisyphus* / OhMyOpenCode) et des **interfaces web**. Voir `DEVELOPMENT.md`
 > (note en tête et §11).
 
+### Recherche — Lazy SMP : interblocage, fuite mémoire, sélection du coup (D6)
+
+- **Interblocage** : `setoption name Threads` pendant une recherche faisait
+  attendre la barrière de fin un effectif jamais lancé (4→8 en cours de route =
+  blocage définitif). L'effectif est désormais **figé au lancement**
+  (`Root_Num_Threads`). Voir `DEVELOPMENT.md` §45.
+- **Fuite mémoire** : un objet tâche par thread et par recherche n'était jamais
+  libéré (~34 kB/recherche à 8 threads) ; il est maintenant récupéré après
+  terminaison de la tâche.
+- **Sélection du coup** : priorité au résultat **complet du thread primaire**
+  (celui qui imprime le PV), repli sur le plus profond des helpers ; le
+  `bestmove` ne pouvait auparavant pas correspondre à la dernière ligne `post`.
+  Une itération d'aspiration interrompue ne peut plus être rapportée (instantané
+  du dernier itéré complet).
+- **Identité mono‑thread conservée** : `--bench` 1→12 bit‑identique, `--bench
+  9/11` = 496 570 / 1 434 292 exactement, `--selftest` vert, `portable` et
+  `release` propres. Scalabilité mesurée : 1,59× à 2 threads, 1,94× à 4,
+  plateau à 8 (pas de régression).
+
 ### Recherche — 17 constantes exposées en params + tuning SPSA (D4/D4b)
 
 - Marges de recherche (futilité, razoring, aspiration, delta, null, LMP, garde

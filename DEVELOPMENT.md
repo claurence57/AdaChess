@@ -1888,3 +1888,83 @@ sont désormais arrondies.
 durable de D4 est **l'infrastructure** (17 constantes runtime, défauts
 bit‑identiques) pour d'éventuelles campagnes futures à budget bien supérieur, et
 non un gain immédiat.
+
+---
+
+## 45. Audit Lazy SMP — scalabilité, défauts réels, corrections sûres
+
+**Objectif** : mesurer si les threads aident réellement, puis corriger ce qui
+limite le SMP sans toucher à l'évaluation, aux paramètres de recherche ni à
+l'arbre mono‑thread. Un seul fichier modifié : `bbchess-search.adb`.
+
+**Mesure.** Le `--bench` est **mono‑thread par construction** : `Run_Bench`
+appelle le `Best_Move (Position, Depth)` à 2 arguments, qui passe par
+`Iterative_Search` directement (il ne consulte jamais `Num_Threads`). Le bench
+reste donc le bon oracle d'identité (§3), mais **ne mesure pas le SMP**. La
+scalabilité est mesurée sur le chemin de jeu, en temps‑à‑profondeur agrégé sur
+4 positions à `sd 16` (meilleur de 3), sur deux binaires (référence puis
+corrigé) ; les deux mesures donnent la même forme (speed‑up run A → run B) :
+
+| threads | speed‑up run A | speed‑up run B |
+|--------:|---------------:|---------------:|
+| 1       | 1,00×          | 1,00×          |
+| 2       | 1,59×          | 1,77×          |
+| 4       | 1,94×          | 2,30×          |
+| 8       | 1,94×          | 1,77×          |
+
+**Le SMP aide jusqu'à ~4 threads puis plafonne, et 8 threads n'apporte rien de
+plus** (variable selon les runs : ≈ 1,8‑1,9× au mieux). Le gain vient de la TT
+partagée et non de la profondeur effective par thread ; il n'y a **pas de
+régression catastrophique** (8 threads ≈ 4 threads, léger recul possible par
+contention mémoire). Validation de force sur le binaire **avant correctif**
+(`--threads 4` vs `--threads 1`, même binaire, 300 parties à 1+0,1, ouvertures
+tirées, couleurs inversées) : **+143,1 ± 29,8 Elo, LOS 100 %, 143‑26‑131
+(69,5 %)**. Le SMP est donc **bénéfique et cohérent avec l'estimation de
+§7septies (+127 Elo)** ; aucune régression de force à craindre des correctifs
+ci‑dessous (ils ne touchent pas l'arbre mono‑thread et ne changent la sélection
+que sur le chemin multi‑thread).
+
+**Défauts identifiés et corrigés** (sévérité entre parenthèses) :
+
+- **(HAUT) Interblocage sur `setoption name Threads` en cours de recherche.**
+  `Completion.Wait_All` attendait `Count >= Num_Threads` (le global), mais la
+  boucle de commandes UCI peut changer `Num_Threads` pendant la recherche :
+  passer de 4 à 8 en cours de route faisait attendre la barrière 8 workers dont
+  seuls 4 avaient été créés → **blocage définitif** (reproduit : la commande
+  `stop` ne rend jamais la main). Corrigé en **figeant l'effectif lancé**
+  (`Root_Num_Threads`, passé à `Done.Reset`/`Wait_All`) ; la prochaine recherche
+  reprend la nouvelle valeur.
+- **(HAUT) Fuite mémoire d'un objet tâche par thread et par recherche.** Les
+  workers `new Searcher (I)` n'étaient **jamais libérés** : ~34 kB/recherche à
+  8 threads (mesuré 0 kB/recherche en mono‑thread, 34 kB à 8). Corrigé par une
+  instance `Unchecked_Deallocation` + `Reclaim_Worker`, qui attend
+  `Ada.Task_Identification.Is_Terminated` (libérer une tâche active est une
+  erreur bornée) avant de libérer l'objet.
+- **(MOYEN) Sélection du coup hors du thread primaire.** La sélection prenait le
+  résultat le plus profond parmi *tous* les threads ; un helper ayant fini une
+  itération plus profonde sur un autre score pouvait être retenu, alors que seul
+  le thread primaire imprime le PV (`Report => (Id = 1)`). Conséquence
+  observable : le `bestmove` ne correspondait pas à la dernière ligne `post`
+  (reproduit : dernière ligne `c2c4`, `bestmove f3e5`). Corrigé : **priorité au
+  résultat complet du thread primaire**, repli sur le plus profond des helpers
+  seulement si le primaire n'a aucun résultat complet.
+- **(MOYEN) Itération incomplète pouvant être rapportée.** Dans `Iterative_Search`,
+  une re‑recherche d'aspiration interrompue après sa passe étroite laissait
+  `Best` réécrit avec un coup évalué sous une borne non vérifiée ; `Completed`
+  restant vrai de l'itération précédente, c'est ce coup partiel qui était
+  renvoyé. Corrigé par un **instantané du dernier itéré complet**
+  (`Done_Best`/`Done_Score`) au moment où l'itération se termine réellement.
+
+Vérifié **corrects** (pas de changement) : heuristiques par contexte (killers,
+history, counter, continuation‑history, `Move_Path`, `Search_Path`, compteurs)
+bien dans `Search_Context` ; écriture TT clé‑en‑dernier (§39 B5) ; arrêt propagé
+par `Stop_Search`/`Abort_Request` atomiques ; `go infinite` + `stop` rend la
+main en ~40 ms à 8 threads.
+
+**Identité mono‑thread conservée** : `--bench` 1→12 **bit‑identique** au
+binaire d'origine (`--bench 9/11` = **496 570 / 1 434 292** exactement),
+`--selftest` vert (perft 1→5, symétrie `Static`, MT‑puis‑ST inclus), build
+`portable` propre et `release` propre après `rm -rf obj_bb`. Stress 8 threads
+profondeur 14 sur ≥ 5 positions × 3 répétitions : aucun plantage/blocage ; build
+`debug` (contrôles actifs) : 3 000 recherches avec effectif cyclé 1→8, sans
+erreur bornée (valide la libération des tâches).
