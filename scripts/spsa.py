@@ -42,20 +42,39 @@ TUNABLE = [
     "P_THREAT_PAWN", "P_THREAT_MINOR",
 ]
 
+# Pruning margins + LMR log constants only; structural switches (Max_Q_Depth,
+# check-extension, History_Max, Null_Red_Div) are deliberately NOT tuned.
+TUNABLE_SEARCH = [
+    "S_FUTILITY_MARGIN", "S_FUTILITY_BASE", "S_RAZOR_MARGIN",
+    "S_ASPIRATION_WINDOW", "S_DELTA_MARGIN", "S_NULL_RED_BASE",
+    "S_LMP_BASE", "S_LMP_QUAD", "S_COUNTER_SCORE",
+    "S_CONT_HISTORY_WEIGHT", "S_LMR_BASE", "S_LMR_DIVISOR",
+]
 
-def dump_params(binary: Path) -> dict[str, int]:
+
+def dump_params(binary: Path) -> dict[str, float]:
     out = subprocess.run([str(binary), "--dump-params"],
                          capture_output=True, text=True, check=True).stdout
     params = {}
     for line in out.splitlines():
         parts = line.split()
         if len(parts) == 2:
-            params[parts[0]] = int(parts[1])
+            # int when possible (exact round-trip), float otherwise (e.g. 7.5E-01)
+            try:
+                params[parts[0]] = int(parts[1])
+            except ValueError:
+                params[parts[0]] = float(parts[1])
     return params
 
 
-def write_params(path: Path, params: dict[str, int]) -> None:
-    path.write_text("".join(f"{k} {v}\n" for k, v in params.items()))
+def write_params(path: Path, params: dict[str, float]) -> None:
+    lines = []
+    for k, v in params.items():
+        if isinstance(v, float) and not float(v).is_integer():
+            lines.append(f"{k} {v:.6g}\n")
+        else:
+            lines.append(f"{k} {int(round(v))}\n")
+    path.write_text("".join(lines))
 
 
 def make_wrapper(path: Path, binary: Path, params_file: Path) -> None:
@@ -106,7 +125,12 @@ def main() -> int:
                          "was ~30-100x too small versus integer rounding")
     ap.add_argument("--a-offset", type=float, default=10.0,
                     help="SPSA a_k denominator offset")
+    ap.add_argument("--search-only", action="store_true",
+                    help="tune only the S_* search params (D4), not the eval P_*")
     args = ap.parse_args()
+
+    if args.search_only:
+        TUNABLE[:] = TUNABLE_SEARCH
 
     rng = random.Random(args.seed)
     binary = Path(args.binary).resolve()
@@ -122,9 +146,19 @@ def main() -> int:
     missing = [k for k in TUNABLE if k not in base]
     if missing:
         print(f"warning: tunable params not found: {missing}", file=sys.stderr)
-    c0 = {k: max(1, int(theta[k]) // 8) for k in theta}
-    lo = {k: max(0, int(theta[k]) - 8 * c0[k]) for k in theta}
-    hi = {k: int(theta[k]) + 12 * c0[k] for k in theta}
+    float_keys = {k for k in theta if isinstance(base[k], float)}
+
+    def step0(k, v):
+        return {
+            "S_LMR_BASE": 0.06, "S_LMR_DIVISOR": 0.15,
+            "S_COUNTER_SCORE": 50_000, "S_HISTORY_MAX": 2_048,
+        }.get(k, max(1, int(abs(v)) // 8))
+
+    c0 = {k: step0(k, base[k]) for k in theta}
+    lo = {k: (base[k] - 8 * c0[k] if k in float_keys
+              else max(0, int(base[k]) - 8 * c0[k])) for k in theta}
+    hi = {k: (base[k] + 12 * c0[k] if k in float_keys
+              else int(base[k]) + 12 * c0[k]) for k in theta}
     start = dict(theta)
 
     book_hidden = None
@@ -148,10 +182,14 @@ def main() -> int:
             ck = {p: c0[p] / (k + 1) ** 0.101 for p in theta}
             ak = args.a / (k + 1 + args.a_offset) ** 0.602
             delta = {p: (1 if rng.random() < 0.5 else -1) for p in theta}
-            plus = {p: min(hi[p], max(lo[p], round(theta[p] + ck[p] * delta[p])))
-                    for p in theta}
-            minus = {p: min(hi[p], max(lo[p], round(theta[p] - ck[p] * delta[p])))
-                     for p in theta}
+
+            def perturb(p, s):
+                v = theta[p] + s * ck[p] * delta[p]
+                v = min(hi[p], max(lo[p], v))
+                return v if p in float_keys else round(v)
+
+            plus = {p: perturb(p, +1) for p in theta}
+            minus = {p: perturb(p, -1) for p in theta}
             write_params(params_a, plus)
             write_params(params_b, minus)
             r = play_match(binary, params_a, params_b, args.games, args.tc,
@@ -165,13 +203,11 @@ def main() -> int:
             with log.open("a") as f:
                 f.write(f"iter {k:3d} score(+)={r:.3f} max_move={moved:.3f} "
                         f"theta={{{', '.join(f'{p}:{theta[p]:.2f}' for p in theta)}}}\n")
-            write_params(out / "params_current.txt",
-                         {p: int(round(v)) for p, v in theta.items()})
+            write_params(out / "params_current.txt", theta)
             print(f"iter {k:3d} score(+)={r:.3f} max_move={moved:.3f}")
     finally:
         restore_book()
-    write_params(out / "params_final.txt",
-                 {p: int(round(v)) for p, v in theta.items()})
+    write_params(out / "params_final.txt", theta)
     print(f"done; parameters in {out}")
     return 0
 
