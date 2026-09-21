@@ -53,6 +53,9 @@ TUNABLE_SEARCH = [
 ]
 
 
+FLOAT_PARAMS = {"S_LMR_BASE", "S_LMR_DIVISOR"}
+
+
 def dump_params(binary: Path) -> dict[str, float]:
     out = subprocess.run([str(binary), "--dump-params"],
                          capture_output=True, text=True, check=True).stdout
@@ -71,7 +74,9 @@ def dump_params(binary: Path) -> dict[str, float]:
 def write_params(path: Path, params: dict[str, float]) -> None:
     lines = []
     for k, v in params.items():
-        if isinstance(v, float) and not float(v).is_integer():
+        # only LMR params are real; integer params must be integers (a float
+        # token is silently ignored by the engine's integer parser)
+        if isinstance(v, float) and not float(v).is_integer() and k in FLOAT_PARAMS:
             lines.append(f"{k} {v:.6g}\n")
         else:
             lines.append(f"{k} {int(round(v))}\n")
