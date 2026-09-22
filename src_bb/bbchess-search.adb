@@ -319,8 +319,22 @@ package body BBChess.Search is
 
    -- 1-ply continuation history: indexed by the (piece, to) of the previous
    -- move and the (piece, to) of the current move. Each pair is packed into a
-   -- single 0 .. 767 index so the table is a flat 768 x 768 score array.
-   type Cont_History_Array is array (0 .. 767, 0 .. 767) of Score_Type;
+   -- single 0 .. 767 index so the table is a flat 768 x 768 array.
+   --
+   -- The stored values are clamped to +/- History_Max (default 16_384), so
+   -- they fit a 16-bit signed element. Halving the element size shrinks the
+   -- table from 2.25 MB to 1.13 MB (closer to the 1 MB L2). Indices, clamping,
+   -- bonus and weight are unchanged, and the value is widened back to
+   -- Score_Type before any arithmetic, so with the default parameters every
+   -- stored/read value - hence the search tree - is bit-identical.
+   type Cont_Value is range -16_384 .. 16_384;
+   for Cont_Value'Size use 16;
+
+   -- Type bounds widened to Score_Type for the saturation test below.
+   Cont_Value_Max : constant Score_Type := Score_Type (Cont_Value'Last);
+   Cont_Value_Min : constant Score_Type := Score_Type (Cont_Value'First);
+
+   type Cont_History_Array is array (0 .. 767, 0 .. 767) of Cont_Value;
 
    -- Move played at each ply of the current line: Move_Path (Ply) is the move
    -- made from ply Ply to Ply + 1. A node at ply P looks up Move_Path (P - 1)
@@ -514,14 +528,23 @@ package body BBChess.Search is
                                 Bonus      : in Score_Type) is
       K : constant Natural := Cont_Index (Prev.Piece, Prev.To);
       J : constant Natural := Cont_Index (Move.Piece, Move.To);
-      V : Score_Type := Ctx.Cont_History (K, J) + Bonus;
+      V : Score_Type := Score_Type (Ctx.Cont_History (K, J)) + Bonus;
    begin
       if V > History_Max then
          V := History_Max;
       elsif V < -History_Max then
          V := -History_Max;
       end if;
-      Ctx.Cont_History (K, J) := V;
+      -- Cont_Value_Max equals the default History_Max, so with the default
+      -- parameters this second clamp is inert and the stored value is exactly
+      -- the old 32-bit one. It only matters for a non-default History_Max
+      -- (never tuned: see scripts/spsa.py).
+      if V > Cont_Value_Max then
+         V := Cont_Value_Max;
+      elsif V < Cont_Value_Min then
+         V := Cont_Value_Min;
+      end if;
+      Ctx.Cont_History (K, J) := Cont_Value (V);
    end Bump_Cont_History;
 
    -- Kind of the piece captured by Move (pawns for en-passant; the moving
@@ -599,8 +622,8 @@ package body BBChess.Search is
       if Prev /= Empty_Move then
          return Ctx.History (Color (Move.Piece), Move.From, Move.To)
            + Cont_History_Weight
-             * Ctx.Cont_History (Cont_Index (Prev.Piece, Prev.To),
-                                 Cont_Index (Move.Piece, Move.To));
+             * Score_Type (Ctx.Cont_History (Cont_Index (Prev.Piece, Prev.To),
+                                             Cont_Index (Move.Piece, Move.To)));
       end if;
       return Ctx.History (Color (Move.Piece), Move.From, Move.To);
    end Order;
