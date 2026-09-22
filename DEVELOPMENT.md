@@ -2100,3 +2100,65 @@ licence **MIT**. Sont concernés aujourd'hui :
 
 Rien n'est encore créé : pas de répertoire `~/BabaChess`, pas de fork. Ceci
 n'est que la **planification** de l'étape suivante.
+
+### 49.1 Réserve structurelle (a) — évaluation incrémentale : NON RENTABLE
+
+Étude de faisabilité (mesure `perf` + analyse). Conclusion **négative et
+documentée** :
+
+- `Evaluate` ≈ **23 % des cycles**, et **~65‑70 % de `Positional_Score`** est le
+  chemin **mobilité / génération d'attaques / popcount**, **structurellement
+  non‑delta‑able** (chaque coup modifie l'occupation).
+- Le résidu réellement incrémentable en **byte‑identique** (paire de fous, tours
+  connectées, PST du roi, agrégats de pions simples) ne pèse que **≈ 1‑2,5 %** du
+  temps — **moins que le surcoût de comptabilité** ajouté dans
+  `Make_Move`/`Unmake_Move`.
+- L'identité byte‑exacte *serait* atteignable (accumulation entière exacte,
+  troncature par terme + `Blend` final), mais la répartition des coûts **tue le
+  gain**.
+
+⇒ **Non implémenté** (aucun prototype), gate respecté. Le matériel+PST est
+**déjà** incrémental (`Position.Material`) ; le reste n'a pas de delta rentable.
+Fichiers inchangés (`--bench` 496 570/1 434 292 exacts, `--selftest` vert).
+
+**Conséquence pour le seuil** : la réserve (a) est **écartée sur la foi de
+mesures**. Reste la réserve (b) — refonte du TT — pour trancher.
+
+### 49.2 Réserve structurelle (b) — refonte TT : AUCUN GAIN
+
+Étude de faisabilité (mesure `perf` + prototype). Conclusion **négative et
+documentée** :
+
+- **Coût TT attribuable** : `--bench 12` → LLC-load-misses **326 K** (0,127/nœud),
+  soit ≈ 75 M cycles = **2,3 % du total** au *maximum absolu* (en supposant tous
+  les misses LLC imputables au TT) ; **≈ 1 %** réaliste. Plafond de tout gain TT
+  **≈ 2‑3 %, réalistement ~1 %**.
+- **Balayage de taille de table (arbre identique)** : 6 Mo (‑4×, réside en L3) →
+  **+1,2 %** ; 24 Mo → référence ; 48 Mo (2×) → **+1,4 %**. Diviser la table par 4
+  **divise les LLC-miss par 2** (326 K → 168 K) **sans aucun gain de vitesse** →
+  le TT est **insensible à la latence** ; ni capacité ni layout ne sont le goulot.
+- **Prototype bucket 4 voies** (24 Mo) : arbre quasi inchangé (1 434 281 vs
+  1 434 292) et **−2,6 à −3,4 % (régression)** — la sonde élargie coûte plus que
+  les évictions qu'elle évite.
+- Le « `Negamax` 39 % » du profil est **le corps de nœud entier** (movegen/éval
+  inlinés), **pas** l'accès mémoire au TT.
+
+⇒ **Aucun gain ; SPRT non justifié ; refonte non adoptée.** La conception actuelle
+(2 voies / 24 Mo / profondeur‑préférée + aging) est **déjà à l'optimum mesuré**.
+
+### 49.3 Seuil « plus d'amélioration sensible » : ÉTABLI
+
+Les **deux** réserves structurelles sont désormais **écartées sur mesures**
+(§49.1 éval incrémentale : résidu byte‑exact ≈ 1‑2,5 % < surcoût ; §49.2 refonte
+TT : plafond ~1 %, le 4‑voies régresse de 3 %). Avec, par ailleurs :
+
+- **7 passes CPU** « sûres » épuisées (dernières < 1 %, §46) ;
+- **toutes** les pistes recherche/éval testées (SE, ProbCut, multi‑cut, outposts,
+  modulateurs LMR, move picker, tri SEE, Texel, SPSA‑éval et SPSA‑recherche) :
+  **neutres ou négatives** ; seuls gains confirmés = ordonnancement
+  counter‑move/history (§40, +22 Elo) et gestion du temps (§41, +50 Elo), **déjà
+  intégrés** ;
+
+le constat **« on ne peut plus améliorer sensiblement les performances »** est
+**établi**. ⇒ Condition de départ de **BabaChess remplie** (§49) : le fork peut
+être créé (`~/BabaChess`, mention d'origine AdaChess, GPL + parts C MIT).
