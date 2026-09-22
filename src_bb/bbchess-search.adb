@@ -124,6 +124,12 @@ package body BBChess.Search is
       S_Check_Ext_Ply_Guard  => 64,
       S_Counter_Score        => 799_999,
       S_Cont_History_Weight  => 1_024,
+      -- S_History_Max may exceed Cont_Value'Last (16_384): the continuation
+      -- history is then saturated at 16_384 by the second clamp in
+      -- Bump_Cont_History. Both values stay far inside a 32-bit Integer. The
+      -- max is deliberately NOT lowered to 16_384 because a params file that
+      -- requests a larger value is well-formed and its (already documented)
+      -- behaviour must not change; History_Max is not tuned by spsa.py.
       S_History_Max          => 1_000_000);
 
    -- Named constants used by the rest of the search (the former hard-coded
@@ -478,7 +484,9 @@ package body BBChess.Search is
    -- History bonus of a quiet move that produced a beta cutoff at Depth.
    -- Quadratic in the depth so that deep cutoffs dominate, and capped so a
    -- single update can never saturate the table (it stays far below the
-   -- killer and capture scores used by Order).
+   -- killer and capture scores used by Order). Depth is at most Max_Ply (128),
+   -- so Depth * Depth reaches 16_384 and the cap returns at most 1_024; the
+   -- product never overflows.
    function History_Bonus (Depth : in Natural) return Score_Type is
       B : constant Score_Type := Score_Type (Depth) * Score_Type (Depth);
    begin
@@ -489,6 +497,11 @@ package body BBChess.Search is
    end History_Bonus;
    pragma Inline (History_Bonus);
 
+   -- The stored value is clamped to +/- History_Max after every update, so it
+   -- is at most History_Max before the next update. Adding a bonus of at most
+   -- 1_024 therefore reaches at most History_Max + 1_024 (1_001_024 with the
+   -- largest tunable History_Max, 1_000_000; 17_408 with the default 16_384):
+   -- far inside a 32-bit Integer, no intermediate overflow.
    procedure Bump_History (Ctx        : in Context_Access;
                            Side       : in Color_Type;
                            From, To   : in Square_Type;
@@ -1689,6 +1702,14 @@ package body BBChess.Search is
    begin
       Accum_Nodes := 0;
    end Reset_Nodes;
+
+   function Transposition_Size_MB return Natural is
+      -- Fixed compile-time table: TT_Size entries of TT_Entry bytes.
+      Bytes : constant Natural :=
+        TT_Size * (TT_Entry'Size / 8);
+   begin
+      return Bytes / (1024 * 1024);
+   end Transposition_Size_MB;
 
    -----------------------------
    -- Tunable search params --

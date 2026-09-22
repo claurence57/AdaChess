@@ -96,6 +96,11 @@ package BBChess.Search is
    procedure Reset_Nodes;
    -- Reset the node counter (benchmarking).
 
+   function Transposition_Size_MB return Natural;
+   -- Size in mebibytes of the transposition table. The table is a
+   -- compile-time-fixed array (not resizable at run time), so this is the
+   -- value reported through the UCI "Hash" option.
+
    ---------------------------------
    -- Tunable search parameters --
    ---------------------------------

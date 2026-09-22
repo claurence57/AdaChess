@@ -131,9 +131,20 @@ package body BBChess.Fen is
          end if;
       end;
 
-      -- Castling rights.
+      -- Castling rights. Unknown characters in the field are ignored, exactly
+      -- as before (a junk field simply yields no right). A right is only kept
+      -- when the king and the matching rook still stand on their home squares:
+      -- the move generator trusts the right and does not check for the rook, so
+      -- an impossible "right without a rook" (from a malformed FEN) would let
+      -- the engine castle with a piece that is not there. A legal FEN always
+      -- has both pieces home when the right is present, so nothing changes for
+      -- well-formed input.
       declare
          Castle : constant String := Field (Text, 3);
+
+         function Home (Piece : in Piece_Type; Square : in Square_Type)
+           return Boolean is
+           ((Pos.Pieces (Piece) and Bit (Square)) /= 0);
       begin
          Pos.Castle := (others => (others => False));
          for C of Castle loop
@@ -145,19 +156,77 @@ package body BBChess.Fen is
                when others => null;
             end case;
          end loop;
+
+         if Pos.Castle (White, King_Side)
+           and then not (Home (White_King, 4) and then Home (White_Rook, 7))
+         then
+            Pos.Castle (White, King_Side) := False;
+         end if;
+         if Pos.Castle (White, Queen_Side)
+           and then not (Home (White_King, 4) and then Home (White_Rook, 0))
+         then
+            Pos.Castle (White, Queen_Side) := False;
+         end if;
+         if Pos.Castle (Black, King_Side)
+           and then not (Home (Black_King, 60) and then Home (Black_Rook, 63))
+         then
+            Pos.Castle (Black, King_Side) := False;
+         end if;
+         if Pos.Castle (Black, Queen_Side)
+           and then not (Home (Black_King, 60) and then Home (Black_Rook, 56))
+         then
+            Pos.Castle (Black, Queen_Side) := False;
+         end if;
       end;
 
-      -- En passant square.
+      -- En passant square. A real target is only meaningful when it matches
+      -- the side to move (rank 6 for White, rank 3 for Black) and an enemy
+      -- pawn actually sits on the square directly behind it (the pawn that
+      -- could be captured). Anything else - a bogus rank, a junk file, a
+      -- missing pawn - is an inconsistent position that would poison every
+      -- later search, so it is normalised to "no en-passant" instead of being
+      -- trusted. "-" and "" mean none, exactly as before.
       declare
          Ep : constant String := Field (Text, 4);
       begin
-         if Ep = "-" or else Ep = "" then
-            Pos.En_Passant := Ep_None;
-         else
-            Pos.En_Passant :=
-              (Character'Pos (Ep (Ep'Last)) - Character'Pos ('1')) * 8 +
-              File_Index (Ep (Ep'First));
+         Pos.En_Passant := Ep_None;
+         if Ep'Length = 2 and then Ep /= "-" then
+            declare
+               File      : constant Natural := File_Index (Ep (Ep'First));
+               Rank_Char : constant Character := Ep (Ep'Last);
+               -- The only ranks a real ep target can occupy: 6 for White to
+               -- move, 3 for Black. Compared as characters so no arithmetic is
+               -- done on a possibly junk digit before it is validated.
+               Expected_Rank : constant Character :=
+                 (if Pos.Side = White then '6' else '3');
+            begin
+               if Rank_Char = Expected_Rank then
+                  declare
+                     Rank   : constant Natural :=
+                       Character'Pos (Rank_Char) - Character'Pos ('1');
+                     Sq     : constant Square_Type := Square_Type (Rank * 8 + File);
+                     -- The pawn that could be captured stands directly behind
+                     -- the target: target - 8 (White) or target + 8 (Black).
+                     Behind : constant Integer :=
+                       (if Pos.Side = White
+                        then Integer (Sq) - 8
+                        else Integer (Sq) + 8);
+                     Pawn_P : Piece_Type;
+                  begin
+                     if Behind in 0 .. 63
+                       and then Piece_At (Pos, Square_Type (Behind), Pawn_P)
+                       and then Pawn_P = Make (Opposite (Pos.Side), Pawn)
+                     then
+                        Pos.En_Passant := Sq;
+                     end if;
+                  end;
+               end if;
+            end;
          end if;
+      exception
+         when Constraint_Error =>
+            -- A non a-h file (or any other malformed field): no en-passant.
+            Pos.En_Passant := Ep_None;
       end;
 
       -- Halfmove and fullmove clocks (best effort).

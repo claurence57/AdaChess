@@ -815,8 +815,17 @@ begin
              UCI_Mode := True;
              Ada.Text_IO.Put_Line ("id name AdaChess-BB 2.0");
              Ada.Text_IO.Put_Line ("id author AdaChess");
+             -- The transposition table is a compile-time-fixed array shared by
+             -- the Lazy SMP threads; it cannot be resized safely at run time
+             -- (reallocating it under in-flight searchers is not provably
+             -- race-free). The option therefore advertises the real fixed size
+             -- instead of a fake tunable range. Setting a different value is
+             -- acknowledged with an "info string" (see "setoption" below).
              Ada.Text_IO.Put_Line
-               ("option name Hash type spin default 64 min 1 max 1024");
+               ("option name Hash type spin default "
+                & Trim_Both (Natural'Image (Transposition_Size_MB))
+                & " min " & Trim_Both (Natural'Image (Transposition_Size_MB))
+                & " max " & Trim_Both (Natural'Image (Transposition_Size_MB)));
              Ada.Text_IO.Put_Line
                ("option name Threads type spin default 1 min 1 max 16");
              Ada.Text_IO.Put_Line
@@ -858,6 +867,22 @@ begin
           elsif Cmd = "setoption" and then UCI_Mode then
              if Token (Par, 1) = "name" then
                 if Token (Par, 2) = "Clear" and then Token (Par, 3) = "Hash" then
+                   Reset_Search;
+                elsif Token (Par, 2) = "Hash"
+                  and then Token (Par, 3) = "value"
+                then
+                   -- The table size is fixed at compile time. A different
+                   -- request is accepted as "Clear Hash" (a fresh, empty table
+                   -- of the real size) and the mismatch is reported, so the
+                   -- option is no longer silently misleading.
+                   if Parse_Natural (Token (Par, 4), 0)
+                     /= Transposition_Size_MB
+                   then
+                      Locked_Put_Line
+                        ("info string Hash size is fixed at "
+                         & Trim_Both (Natural'Image (Transposition_Size_MB))
+                         & " MB (compile-time); clearing table");
+                   end if;
                    Reset_Search;
                 elsif Token (Par, 2) = "Threads"
                   and then Token (Par, 3) = "value"

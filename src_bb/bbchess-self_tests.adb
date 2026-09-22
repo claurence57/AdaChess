@@ -317,6 +317,65 @@ package body BBChess.Self_Tests is
 
       Ada.Text_IO.Put_Line ("FEN validation OK");
 
+      -- En-passant FEN field validation: a real target is only accepted when
+      -- it matches the side to move and an enemy pawn actually sits behind it;
+      -- every other (malformed) field must be normalised to "no en-passant"
+      -- instead of yielding an inconsistent position.
+      declare
+         P : Position_Type;
+      begin
+         -- Valid: White to move, black pawn on d5, ep target d6.
+         Load (P, "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1");
+         Assert (P.En_Passant = 43, "valid ep d6 must be kept (square 43)");
+
+         -- Wrong rank for the side to move: d3 with White to move.
+         Load (P, "4k3/8/8/3pP3/8/8/8/4K3 w - d3 0 1");
+         Assert (P.En_Passant = -1, "ep on the wrong rank must be rejected");
+
+         -- Junk file: must not raise, must yield no ep target.
+         Load (P, "4k3/8/8/3pP3/8/8/8/4K3 w - x6 0 1");
+         Assert (P.En_Passant = -1, "ep with a junk file must be rejected");
+
+         -- No enemy pawn behind the target (only a White pawn on e5).
+         Load (P, "4k3/8/8/4P3/8/8/8/4K3 w - d6 0 1");
+         Assert (P.En_Passant = -1, "ep without a pawn to capture must be rejected");
+
+         -- Black to move: a valid target is on rank 3, captured pawn on rank 4.
+         Load (P, "4k3/8/8/8/3Pp3/8/8/4K3 b - d3 0 1");
+         Assert (P.En_Passant = 19, "valid ep d3 (Black) must be kept (square 19)");
+      end;
+
+      Ada.Text_IO.Put_Line ("en-passant FEN validation OK");
+
+      -- En-passant capture arithmetic: the captured pawn is read from the
+      -- square directly behind the target. Exercise a legal capture and its
+      -- undo (the computed square is a valid index and the board is restored).
+      declare
+         P          : Position_Type;
+         U          : Undo_Info;
+         M          : constant Move_Type :=
+           (From => 36, To => 43, Piece => White_Pawn,
+            Promotion => White_Pawn, Flag => En_Passant);
+         Occ_Before : Bitboard;
+      begin
+         Load (P, "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1");
+         Occ_Before := Occupancy (P);
+         Make_Move (P, M, U);
+         Assert (U.Has_Captured and then Kind (U.Captured) = Pawn,
+                 "ep capture must record a captured pawn");
+         Assert (U.Captured_Square = 35,
+                 "ep capture must take the pawn on d5 (square 35)");
+         Assert (Is_Empty (P, 35) and then Is_Empty (P, 36),
+                 "ep capture must clear d5 (pawn) and e5 (mover)");
+         Assert (not Is_Empty (P, 43), "ep capture must land the pawn on d6");
+
+         Unmake_Move (P, M, U);
+         Assert (Occupancy (P) = Occ_Before,
+                 "ep unmake must restore the occupancy");
+      end;
+
+      Ada.Text_IO.Put_Line ("en-passant arithmetic OK");
+
       -- Evaluation + search sanity. Static is the tempo-free, fully
       -- symmetric core (0 on the initial position); Evaluate adds Tempo for
       -- the side to move (White on the initial position).

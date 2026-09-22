@@ -113,14 +113,37 @@ package body BBChess.Moves is
 
       -- Captures.
       if Move.Flag = En_Passant then
+         -- The captured pawn stands directly behind the destination: one rank
+         -- "south" (minus 8) for White, one rank "north" (plus 8) for Black,
+         -- i.e. the ep target square itself. A legal en-passant move always
+         -- has Move.To on rank 6 (White) or rank 3 (Black), so the captured
+         -- square is a valid 0 .. 63 index. The release build is compiled with
+         -- -gnatp (run-time checks off), so this arithmetic is nevertheless
+         -- carried in Integer and range-checked by hand: a malformed move
+         -- would otherwise wrap out of Square_Type and corrupt the board.
+         -- A malformed en-passant move is treated as a non-capture (the board
+         -- is left untouched); every legal move is unaffected.
          declare
-            Cap_Sq : constant Square_Type :=
+            Cap_Value : constant Integer :=
               (if Moving = White then Move.To - 8 else Move.To + 8);
          begin
-            Undo.Captured        := Make (Opp, Pawn);
-            Undo.Has_Captured    := True;
-            Undo.Captured_Square := Cap_Sq;
-            Remove_Piece (Position, Make (Opp, Pawn), Cap_Sq);
+            pragma Assert
+              ((if Moving = White then Rank_Of (Move.To) = 5
+                                     else Rank_Of (Move.To) = 2),
+               "en passant: target must be on rank 6 (White) / rank 3 (Black)");
+            if Cap_Value in 0 .. 63 then
+               declare
+                  Cap_Sq : constant Square_Type := Square_Type (Cap_Value);
+               begin
+                  pragma Assert
+                    (Rank_Of (Cap_Sq) = (if Moving = White then 4 else 3),
+                     "en passant: captured pawn must sit on rank 5 / rank 4");
+                  Undo.Captured        := Make (Opp, Pawn);
+                  Undo.Has_Captured    := True;
+                  Undo.Captured_Square := Cap_Sq;
+                  Remove_Piece (Position, Make (Opp, Pawn), Cap_Sq);
+               end;
+            end if;
          end;
       else
          -- A capture is detected with the opponent's occupancy (O(1)); the
@@ -189,10 +212,27 @@ package body BBChess.Moves is
          end if;
       end;
 
-      -- En-passant target square after a double pawn push.
+      -- En-passant target square after a double pawn push. A legal double
+      -- push starts on rank 2 (White, index 8..15) or rank 7 (Black, index
+      -- 48..55), so the target is always a valid square. As for the en-passant
+      -- capture above, the computation is done in Integer and range-checked by
+      -- hand rather than relying on the (disabled) run-time checks; a
+      -- malformed move simply leaves no en-passant target.
       if Move.Flag = Double_Push then
-         Position.En_Passant :=
-           (if Moving = White then Move.From + 8 else Move.From - 8);
+         declare
+            Ep_Value : constant Integer :=
+              (if Moving = White then Move.From + 8 else Move.From - 8);
+         begin
+            pragma Assert
+              ((if Moving = White then Rank_Of (Move.From) = 1
+                                     else Rank_Of (Move.From) = 6),
+               "double push: origin must be on rank 2 (White) / rank 7 (Black)");
+            if Ep_Value in 0 .. 63 then
+               Position.En_Passant := Ep_Value;
+            else
+               Position.En_Passant := Ep_None;
+            end if;
+         end;
       else
          Position.En_Passant := Ep_None;
       end if;
