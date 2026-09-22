@@ -40,6 +40,9 @@ use BBChess.Movegen;
 with BBChess.Eval;
 use BBChess.Eval;
 
+with BBChess.Piece_Values;
+use BBChess.Piece_Values;
+
 with BBChess.See;
 use BBChess.See;
 
@@ -453,20 +456,6 @@ package body BBChess.Search is
    -- Move ordering helpers --
    -------------------------------
 
-   -- Piece values in centipawns (mirrors the evaluation), used by MVV-LVA.
-   function Kind_Value (Kind : in Kind_Type) return Score_Type is
-   begin
-      case Kind is
-         when Pawn   => return 100;
-         when Knight => return 320;
-         when Bishop => return 330;
-         when Rook   => return 500;
-         when Queen  => return 900;
-         when King   => return 0;
-      end case;
-   end Kind_Value;
-   pragma Inline (Kind_Value);
-
    function Is_Tactical (Position : in Position_Type; Move : in Move_Type)
      return Boolean is
    begin
@@ -584,14 +573,14 @@ package body BBChess.Search is
       end if;
 
       if Move.Flag = Promotion then
-         return 50_000_000 + Kind_Value (Kind (Move.Promotion));
+         return 50_000_000 + Ordering_Value (Kind (Move.Promotion));
       end if;
 
       if Tactical then
          declare
             Victim   : constant Score_Type :=
-              Kind_Value (Captured_Kind (Position, Move));
-            Attacker : constant Score_Type := Kind_Value (Kind (Move.Piece));
+              Ordering_Value (Captured_Kind (Position, Move));
+            Attacker : constant Score_Type := Ordering_Value (Kind (Move.Piece));
          begin
             return 2_000_000 + Victim * 16 - Attacker;
          end;
@@ -905,7 +894,7 @@ package body BBChess.Search is
             for I in 1 .. Count loop
                if Is_Tactical (Position, Moves (I)) then
                   T := T + 1;
-                  Vic (T) := Kind_Value (Captured_Kind (Position, Moves (I)));
+                  Vic (T) := Ordering_Value (Captured_Kind (Position, Moves (I)));
                   declare
                      Tmp : constant Move_Type := Moves (T);
                   begin
@@ -917,7 +906,7 @@ package body BBChess.Search is
          else
             T := Count;
             for I in 1 .. Count loop
-               Vic (I) := Kind_Value (Captured_Kind (Position, Moves (I)));
+               Vic (I) := Ordering_Value (Captured_Kind (Position, Moves (I)));
             end loop;
          end if;
 
