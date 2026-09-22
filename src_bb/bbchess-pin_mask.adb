@@ -2,6 +2,9 @@
 --  AdaChess-BB : absolute pin detection (body)
 --
 
+with BBChess.Attacks;
+use BBChess.Attacks;
+
 package body BBChess.Pin_Mask is
 
    function Pinned (Occ               : in Bitboard;

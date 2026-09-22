@@ -3,6 +3,7 @@
 --
 
 with Ada.Text_IO;
+with Ada.IO_Exceptions;
 
 package body BBChess.Tunable is
 

@@ -12,14 +12,8 @@
 --  and such a slider.
 --
 
-with BBChess.Pieces;
-use BBChess.Pieces;
-
 with BBChess.Board;
 use BBChess.Board;
-
-with BBChess.Attacks;
-use BBChess.Attacks;
 
 package BBChess.Pin_Mask is
 

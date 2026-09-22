@@ -11,9 +11,6 @@
 --  two packages), so this unit factors exactly those two pieces.
 --
 
-with Ada.Text_IO;
-with Ada.IO_Exceptions;
-
 package BBChess.Tunable is
 
    procedure Put (Name : in String; Value : in Integer);

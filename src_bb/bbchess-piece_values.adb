@@ -15,7 +15,6 @@ package body BBChess.Piece_Values is
          when King   => return 0;
       end case;
    end Ordering_Value;
-   pragma Inline (Ordering_Value);
 
    function SEE_Value (Kind : in Kind_Type) return Score_Type is
    begin
@@ -28,6 +27,5 @@ package body BBChess.Piece_Values is
          when King   => return 10_000;
       end case;
    end SEE_Value;
-   pragma Inline (SEE_Value);
 
 end BBChess.Piece_Values;
