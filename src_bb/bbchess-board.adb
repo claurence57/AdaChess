@@ -84,6 +84,9 @@ package body BBChess.Board is
       Flip : constant Bitboard := Bit (From) xor Bit (To);
       Col  : constant Color_Type := Pieces.Color (Piece);
    begin
+      pragma Assert ((Position.All_Occ and Bit (From)) /= 0,
+                     "Move_Piece: source square is empty");
+      pragma Assert (To /= From, "Move_Piece: source and destination coincide");
       Position.Pieces (Piece) := Position.Pieces (Piece) xor Flip;
       Position.All_Occ := Position.All_Occ xor Flip;
       Position.Color_Occ (Col) := Position.Color_Occ (Col) xor Flip;

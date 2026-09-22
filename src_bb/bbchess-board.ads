@@ -47,7 +47,13 @@ package BBChess.Board is
 
    -- Square -> piece map, maintained incrementally by Put_Piece /
    -- Remove_Piece, so Piece_At is an O(1) lookup instead of a bitboard scan.
-   -- The entry of an empty square is unspecified (use All_Occ to test).
+   --
+   -- Invariant: Squares (S) is only meaningful while S is in All_Occ. There
+   -- is no "empty" value in Piece_Type, so Remove_Piece and Move_Piece leave
+   -- a stale value behind on the square they vacate (only Put_Piece and
+   -- Move_Piece's destination write a fresh entry). Readers MUST therefore
+   -- test All_Occ first -- exactly as Piece_At does -- and never use
+   -- Squares (S) directly for an empty square.
    type Square_Piece_Array is array (Square_Type) of Piece_Type;
    type Position_Type is
       record
