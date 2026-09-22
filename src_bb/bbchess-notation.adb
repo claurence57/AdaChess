@@ -2,6 +2,9 @@
 --  AdaChess-BB : move notation (body)
 --
 
+with BBChess.Pieces;
+use BBChess.Pieces;
+
 with BBChess.Movegen;
 use BBChess.Movegen;
 

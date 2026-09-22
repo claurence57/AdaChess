@@ -367,7 +367,7 @@ package body BBChess.Self_Tests is
       end;
 
       declare
-         Pos   : Position_Type := Start_Position;
+         Pos   : constant Position_Type := Start_Position;
          Best  : Move_Type;
          List  : Move_List;
          Count : Natural;
@@ -391,7 +391,7 @@ package body BBChess.Self_Tests is
       -- is what keeps the engine from losing on time under a GUI).
       declare
          Start_T : constant Time := Clock;
-         Pos     : Position_Type := Start_Position;
+         Pos     : constant Position_Type := Start_Position;
          Best    : Move_Type;
          List    : Move_List;
          Count   : Natural;
@@ -463,7 +463,7 @@ package body BBChess.Self_Tests is
       -- soft/hard pair must still return a legal move within the hard bound.
       declare
          Start_T : constant Time := Clock;
-         Pos     : Position_Type := Start_Position;
+         Pos     : constant Position_Type := Start_Position;
          Best    : Move_Type;
          List    : Move_List;
          Count   : Natural;
@@ -489,7 +489,7 @@ package body BBChess.Self_Tests is
       -- fixed-depth search (same node count), so the new entry point does
       -- not perturb untimed play.
       declare
-         Pos          : Position_Type := Start_Position;
+         Pos          : constant Position_Type := Start_Position;
          Ref_Move     : Move_Type;
          Got_Move     : Move_Type;
          Ref_Nodes    : Natural;

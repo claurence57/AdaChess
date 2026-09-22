@@ -40,8 +40,10 @@ project AdaChess_BB is
                "-mpopcnt", "-mbmi", "-mbmi2", "-flto");
             for Switches ("c") use ("-O3", "-mpopcnt", "-mbmi", "-mbmi2", "-flto");
          when "debug" =>
+            --  -gnatwa enables all warnings; the debug build is the only one
+            --  that carries them (release/portable stay quiet and fast).
             for Switches ("ada") use
-              ("-gnat2012", "-gnata", "-g",
+              ("-gnat2012", "-gnata", "-g", "-gnatwa", "-gnatVa",
                "-gnatep=../src_bb/prep.data");
             for Switches ("c") use ("-O0", "-g");
          when "portable" =>

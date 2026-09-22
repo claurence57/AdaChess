@@ -16,9 +16,6 @@ use BBChess.Pieces;
 with BBChess.Board;
 use BBChess.Board;
 
-with BBChess.Attacks;
-use BBChess.Attacks;
-
 with BBChess.Moves;
 use BBChess.Moves;
 

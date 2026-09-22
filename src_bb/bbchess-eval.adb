@@ -718,7 +718,6 @@ package body BBChess.Eval is
       Near     : constant Bitboard := Near_Zone (Enemy_King);
       Far      : constant Bitboard := Far_Zone (Enemy_King);
       Result   : Tapered_Score_Type := (Opening => 0, End_Game => 0);
-      B        : Bitboard;
    begin
       -- Enemy-king danger posed by Color's pieces, accumulated below along
       -- the mobility loop (same attack sets) and consumed by the enemy's

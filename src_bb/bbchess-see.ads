@@ -17,9 +17,6 @@
 --  Sliding x-ray attackers are naturally revealed because the occupancy is
 --  updated at every step of the sequence.
 
-with BBChess.Pieces;
-use BBChess.Pieces;
-
 with BBChess.Board;
 use BBChess.Board;
 

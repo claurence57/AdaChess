@@ -179,17 +179,13 @@ package body BBChess.Moves is
          end if;
 
          if Undo.Has_Captured and then Kind (Undo.Captured) = Rook then
-            declare
-               Cap_Color : constant Color_Type := Color (Undo.Captured);
-            begin
-               case Undo.Captured_Square is
-                  when 0 =>  Position.Castle (White, Queen_Side) := False; -- a1
-                  when 7 =>  Position.Castle (White, King_Side)  := False; -- h1
-                  when 56 => Position.Castle (Black, Queen_Side) := False; -- a8
-                  when 63 => Position.Castle (Black, King_Side)  := False; -- h8
-                  when others => null;
-               end case;
-            end;
+            case Undo.Captured_Square is
+               when 0 =>  Position.Castle (White, Queen_Side) := False; -- a1
+               when 7 =>  Position.Castle (White, King_Side)  := False; -- h1
+               when 56 => Position.Castle (Black, Queen_Side) := False; -- a8
+               when 63 => Position.Castle (Black, King_Side)  := False; -- h8
+               when others => null;
+            end case;
          end if;
       end;
 

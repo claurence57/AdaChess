@@ -5,6 +5,9 @@
 with Interfaces;
 with Interfaces.C.Strings;
 
+with BBChess.Pieces;
+use BBChess.Pieces;
+
 package body BBChess.Syzygy is
 
    use type Interfaces.C.unsigned;

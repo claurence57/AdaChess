@@ -5,9 +5,6 @@
 --  books (16-byte entries, big-endian, sorted by key).
 --
 
-with BBChess.Pieces;
-use BBChess.Pieces;
-
 with BBChess.Board;
 use BBChess.Board;
 

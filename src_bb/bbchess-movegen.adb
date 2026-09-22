@@ -2,6 +2,9 @@
 --  AdaChess-BB : legal move generation (body)
 --
 
+with BBChess.Attacks;
+use BBChess.Attacks;
+
 package body BBChess.Movegen is
 
    -------------

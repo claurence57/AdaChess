@@ -32,6 +32,12 @@ with Ada.Task_Identification;
 with BBChess.Hash;
 use BBChess.Hash;
 
+with BBChess.Pieces;
+use BBChess.Pieces;
+
+with BBChess.Movegen;
+use BBChess.Movegen;
+
 with BBChess.Eval;
 use BBChess.Eval;
 
@@ -459,13 +465,11 @@ package body BBChess.Search is
    -- History_Max and Cont_History_Weight are tunable search parameters
    -- (renames of Search_Params).
 
-   --  Scratch arrays used by the movers. They are written for every move in
+   --  Scratch array used by the movers. It is written for every move in
    --  1 .. Count before the corresponding entry is read, so the per-call
-   --  default initialization (a 1 KB zero fill each) is only overhead.
+   --  default initialization (a 1 KB zero fill) is only overhead.
    type Order_Array is array (1 .. 256) of Score_Type;
-   type Flag_Array is array (1 .. 256) of Boolean;
    pragma Suppress_Initialization (Order_Array);
-   pragma Suppress_Initialization (Flag_Array);
 
    -- History bonus of a quiet move that produced a beta cutoff at Depth.
    -- Quadratic in the depth so that deep cutoffs dominate, and capped so a
@@ -796,8 +800,8 @@ package body BBChess.Search is
                         QDepth     : in Natural) return Score_Type
    is
       A        : Score_Type := Alpha;
-      B        : Score_Type := Beta;
-      In_Check : Boolean := King_In_Check (Position, Position.Side);
+      B        : constant Score_Type := Beta;
+      In_Check : constant Boolean := King_In_Check (Position, Position.Side);
       Stand    : Score_Type := 0;
       Moves    : Move_List;
       Count    : Natural;
@@ -1014,9 +1018,6 @@ package body BBChess.Search is
       Eval_Now    : Score_Type := 0;
       Have_Eval   : Boolean := False;
       TT_Score    : Score_Type := 0;
-      TT_Bound    : Bound_Type := Exact;
-      TT_Depth    : TT_Depth_Type := -1;
-      Have_TT     : Boolean := False;
       -- Move made on the previous ply (the move that led to this node); the
       -- counter-move and continuation-history orderings key on it.
       Prev        : Move_Type := Empty_Move;
@@ -1114,9 +1115,6 @@ package body BBChess.Search is
 
          if Found then
             TT_Score := Adjust_Score (E.Score, Ply);
-            TT_Bound := E.Bound;
-            TT_Depth := E.Depth;
-            Have_TT  := True;
             if E.Depth >= TT_Depth_Type (Depth) then
                case E.Bound is
                   when Exact =>
@@ -1286,7 +1284,7 @@ package body BBChess.Search is
                  Moves (I).Flag in En_Passant | Promotion
                  or else (Enemy_Occ and Bit (Moves (I).To)) /= 0;
                Reduction : Natural := 0;
-               Move_Depth : Natural := Child_Depth;
+               Move_Depth : constant Natural := Child_Depth;
             begin
                -- Late move pruning: at low depth the late quiet moves are
                -- simply skipped (they are ordered last and almost never
@@ -1429,7 +1427,7 @@ package body BBChess.Search is
       Root_Moves : Move_List;
       Count      : Natural;
       A          : Score_Type := Alpha;
-      B          : Score_Type := Beta;
+      B          : constant Score_Type := Beta;
       Best       : Move_Type := Empty_Move;
       Best_Sc    : Score_Type := -Infinity;
    begin

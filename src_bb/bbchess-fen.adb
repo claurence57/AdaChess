@@ -5,6 +5,9 @@
 with BBChess.Hash;
 use BBChess.Hash;
 
+with BBChess.Pieces;
+use BBChess.Pieces;
+
 with BBChess.Eval;
 use BBChess.Eval;
 

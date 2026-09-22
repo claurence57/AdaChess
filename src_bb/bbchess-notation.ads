@@ -4,9 +4,6 @@
 --  Converts moves to/from coordinate notation such as "e2e4", "e7e8q".
 --
 
-with BBChess.Pieces;
-use BBChess.Pieces;
-
 with BBChess.Board;
 use BBChess.Board;
 

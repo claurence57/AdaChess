@@ -9,20 +9,11 @@
 --  aspiration windows around the previous score.
 --
 
-with BBChess.Pieces;
-use BBChess.Pieces;
-
 with BBChess.Board;
 use BBChess.Board;
 
 with BBChess.Moves;
 use BBChess.Moves;
-
-with BBChess.Movegen;
-use BBChess.Movegen;
-
-with BBChess.Eval;
-use BBChess.Eval;
 
 package BBChess.Search is
 

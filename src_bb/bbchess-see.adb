@@ -19,8 +19,8 @@
 with BBChess.Attacks;
 use BBChess.Attacks;
 
-with BBChess.Movegen;
-use BBChess.Movegen;
+with BBChess.Pieces;
+use BBChess.Pieces;
 
 package body BBChess.See is
 

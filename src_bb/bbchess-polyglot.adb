@@ -11,6 +11,9 @@ with Ada.Streams.Stream_IO;
 with Ada.Unchecked_Deallocation;
 with Ada.Numerics.Discrete_Random;
 
+with BBChess.Pieces;
+use BBChess.Pieces;
+
 with BBChess.Movegen;
 use BBChess.Movegen;
 

@@ -6,9 +6,6 @@
 --  command.
 --
 
-with BBChess.Pieces;
-use BBChess.Pieces;
-
 with BBChess.Board;
 use BBChess.Board;
 

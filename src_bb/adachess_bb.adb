@@ -36,9 +36,6 @@ use BBChess.Moves;
 
 with BBChess.Hash;
 
-with BBChess.Movegen;
-use BBChess.Movegen;
-
 with BBChess.Fen;
 use BBChess.Fen;
 
@@ -730,7 +727,7 @@ begin
    for I in 1 .. Ada.Command_Line.Argument_Count loop
       declare
          A : constant String := Ada.Command_Line.Argument (I);
-         N : Natural := BBChess.Text.Thread_Count (A, 0);
+         N : constant Natural := BBChess.Text.Thread_Count (A, 0);
       begin
          if A = "--threads"
            and then I < Ada.Command_Line.Argument_Count
