@@ -128,8 +128,9 @@ la **mémoire** (−1,1 Mo) à arbre bit-identique, **pas** comme gain de vitess
   plausibles** (`+31` vs `+24` ; `+13` vs `−8` ; identiques ailleurs). 2 bestmoves
   divergent mono/multi — **attendu en Lazy SMP** (partitionnement différent), pas une
   régression : l'identité mono-thread est garantie par `--bench`.
-- **SPRT** 100 parties 10+0.1 (OLD `d2c8b4e` vs NEW HEAD) : voir `DEVELOPMENT.md` §48.
-
+- **SPRT** 100 parties 10+0.1 (OLD `d2c8b4e` vs NEW HEAD) : **NEW 23-21-56
+  (51,0 %), +6,9 ± 45,4 Elo, LOS 61,8 % → neutre** (56 % de nulles). Aucune
+  régression : conforme à un chantier solidité/propreté à arbre bit-identique.
 ## NPS global avant/après
 
 `--bench 11`, min de 7 runs entrelacés : **avant 0,5045 s** vs **après 0,5065 s**

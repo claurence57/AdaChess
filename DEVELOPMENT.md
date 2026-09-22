@@ -2059,9 +2059,9 @@ goulot, LLC-miss −10,7 % mais cycles dans le bruit).
 
 **P7 — validation** : perft + Kiwipete exacts ; SMP (profondeur 14, 1 vs 4 threads,
 5 positions) sans crash et **scores plausibles** (2 bestmoves divergent mono/multi —
-attendu en Lazy SMP, l'identité mono-thread étant garantie par `--bench`) ; SPRT
-100 part. 10+0.1 vs `d2c8b4e` (résultat au §48/`CHANGELOG_TECHNIQUE.md`).
-
+attendu en Lazy SMP, l'identité mono-thread étant garantie par `--bench`) ;
+**SPRT 100 part. 10+0.1 vs `d2c8b4e` : NEW 23-21-56 (51,0 %), +6,9 ± 45,4 Elo,
+LOS 61,8 % → neutre** (56 % de nulles) — aucune régression.
 **NPS global** : `--bench 11` min de 7 runs entrelacés — **avant 0,5045 s** vs
 **après 0,5065 s (−0,4 %, bruit)**. Aucune régression ; chantier de solidité et de
 propreté, plus un gain SEE marginal. **5 commits** P0→P6 (P3, P4 et P5 partagent un
