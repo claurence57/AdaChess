@@ -2066,3 +2066,37 @@ LOS 61,8 % → neutre** (56 % de nulles) — aucune régression.
 **après 0,5065 s (−0,4 %, bruit)**. Aucune régression ; chantier de solidité et de
 propreté, plus un gain SEE marginal. **5 commits** P0→P6 (P3, P4 et P5 partagent un
 commit : hunks entrelacés dans les mêmes fichiers).
+
+---
+
+## 49. Objectif final : le fork BabaChess (planifié)
+
+**But** : quand il sera établi qu'on ne peut plus améliorer *sensiblement* les
+performances du moteur, créer un **nouveau projet `BabaChess`** dans son propre
+répertoire `~/BabaChess`. Le projet **rappellera explicitement qu'il est issu d'un
+fork d'AdaChess**. Le développement se poursuivra alors **uniquement** sur
+BabaChess.
+
+**Licence** : **GPL** (comme AdaChess), **sauf** les parties en C reprises sous
+licence **MIT**. Sont concernés aujourd'hui :
+- `src_bb/fathom/` — tablebases **Syzygy**, licence **MIT**
+  (`src_bb/fathom/LICENSE`, © Ronald de Man / basil00 / Jon Dart) ;
+- `src_bb/fathom/stdendian.h` — **MIT** (en-tête tiers dans Fathom) ;
+- `src_bb/bbchess-bits.c` — écrit pour ce projet (repli PEXT portable) : à
+  confirmer au moment du fork (aucune mention MIT dans le fichier → a priori GPL,
+  sauf décision contraire à ce moment-là).
+
+**Condition de départ** : ne lancer BabaChess qu'après avoir **établi le seuil**
+« plus d'amélioration sensible ». État actuel de ce constat :
+- **CPU** : 7 passes « sûres » épuisées, dernières < 1 % (§46) ; réserves
+  structurelles (éval incrémentale, refonte TT) non ouvertes.
+- **Recherche/éval** : gains confirmés par SPRT long = ordonnancement
+  counter‑move/history (§40, +22) et gestion du temps (§41, +50) ; le reste
+  (SPSA, Texel, SE, ProbCut, multi‑cut, outposts, modulateurs LMR, etc.) est
+  **neutre ou négatif** (§§13‑44).
+- **Reste à trancher** : les deux réserves structurelles ci‑dessus n'ont pas
+  encore été tentées avec un SPRT long ; tant qu'elles ne le sont pas, le seuil
+  « plus d'amélioration sensible » n'est pas **établi**.
+
+Rien n'est encore créé : pas de répertoire `~/BabaChess`, pas de fork. Ceci
+n'est que la **planification** de l'étape suivante.
