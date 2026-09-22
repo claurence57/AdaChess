@@ -4,6 +4,8 @@
 
 with BBChess.Attacks;
 use BBChess.Attacks;
+with BBChess.Pin_Mask;
+use BBChess.Pin_Mask;
 
 package body BBChess.Movegen is
 
@@ -102,40 +104,22 @@ package body BBChess.Movegen is
    -- Computed from the full (empty-board) rays of the king rather than a
    -- per-square walk: the potential pinners are the enemy sliders on those
    -- rays, and a pin exists when exactly one friendly piece stands between.
+   -- The bitboard-level work is shared with SEE through BBChess.Pin_Mask.
    function Pin_Mask (Position : in Position_Type; Color : in Color_Type)
      return Bitboard
    is
-      Enemy    : constant Color_Type := Opposite (Color);
-      King_Sq  : constant Square_Type :=
-        Lowest_Bit (Position.Pieces (Make (Color, King)));
-      Occ      : constant Bitboard := Occupancy (Position);
-      Own      : constant Bitboard := Position.Color_Occ (Color);
-      Rook_Q   : constant Bitboard :=
-        Position.Pieces (Make (Enemy, Rook))
-        or Position.Pieces (Make (Enemy, Queen));
-      Bish_Q   : constant Bitboard :=
-        Position.Pieces (Make (Enemy, Bishop))
-        or Position.Pieces (Make (Enemy, Queen));
-      Pinners  : Bitboard :=
-        (Rook_Ray (King_Sq) and Rook_Q) or (Bishop_Ray (King_Sq) and Bish_Q);
-      Result   : Bitboard := 0;
+      Enemy : constant Color_Type := Opposite (Color);
    begin
-      while Pinners /= 0 loop
-         declare
-            P        : constant Square_Type := Lowest_Bit (Pinners);
-            Blockers : Bitboard;
-         begin
-            Blockers := Between (King_Sq, P) and Occ;
-            if Blockers /= 0
-              and then (Blockers and (Blockers - 1)) = 0
-              and then (Blockers and Own) /= 0
-            then
-               Result := Result or Blockers;
-            end if;
-         end;
-         Pinners := Pinners and (Pinners - 1);
-      end loop;
-      return Result;
+      return Pinned
+        (Occ                => Occupancy (Position),
+         King_Sq            => Lowest_Bit (Position.Pieces (Make (Color, King))),
+         Own                => Position.Color_Occ (Color),
+         Enemy_Rook_Queen   =>
+           Position.Pieces (Make (Enemy, Rook))
+           or Position.Pieces (Make (Enemy, Queen)),
+         Enemy_Bishop_Queen =>
+           Position.Pieces (Make (Enemy, Bishop))
+           or Position.Pieces (Make (Enemy, Queen)));
    end Pin_Mask;
 
    ---------------------

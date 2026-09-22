@@ -1,12 +1,14 @@
 --
 --  AdaChess-BB : static exchange evaluation (body)
 --
---  The sequence is explored with a small recursive minimax over a working
---  copy of the board: each step removes the chosen attacker from its
---  square, removes the piece standing on the target square and settles the
---  attacker on it, then lets the opponent answer. The occupancy is therefore
---  always up to date, which makes x-ray (sliding) attackers appear as soon
---  as the piece in front of them is gone.
+--  The sequence is explored over a working copy of the board: each step
+--  removes the chosen attacker from its square, removes the piece standing on
+--  the target square and settles the attacker on it, then lets the opponent
+--  answer. The occupancy is therefore always up to date, which makes x-ray
+--  (sliding) attackers appear as soon as the piece in front of them is gone.
+--  The sequence is generated forward once (Exchange), then folded backward
+--  from the deepest reply with the same "a side may decline" rule the former
+--  recursion used.
 --
 --  The working copy only needs the twelve piece bitboards, the total
 --  occupancy and the two colour occupancies: the exchange never looks at the
@@ -21,6 +23,12 @@ use BBChess.Attacks;
 
 with BBChess.Pieces;
 use BBChess.Pieces;
+
+with BBChess.Piece_Values;
+use BBChess.Piece_Values;
+
+with BBChess.Pin_Mask;
+use BBChess.Pin_Mask;
 
 package body BBChess.See is
 
@@ -55,62 +63,24 @@ package body BBChess.See is
    pragma Inline (See_Remove);
 
    -----------------
-   -- Kind_Value --
-   -----------------
-
-   -- Values match the evaluation / search piece values. The king only ever
-   -- appears as the last attacker of a sequence, so its magnitude is never
-   -- part of a result.
-   function Kind_Value (Kind : in Kind_Type) return Score_Type is
-   begin
-      case Kind is
-         when Pawn   => return 100;
-         when Knight => return 320;
-         when Bishop => return 330;
-         when Rook   => return 500;
-         when Queen  => return 900;
-         when King   => return 10_000;
-      end case;
-   end Kind_Value;
-
-   -----------------
    -- Pin_Mask_See --
    -----------------
 
-   -- Pin_Mask on the compact board (same computation as Movegen.Pin_Mask,
-   -- only the fields used by the bitboard-only working copy).
+   -- Pin_Mask on the compact board (the bitboard-level work is shared with
+   -- Movegen through BBChess.Pin_Mask).
    function Pin_Mask_See (B : in See_Board; Color : in Color_Type)
      return Bitboard
    is
-      Enemy   : constant Color_Type := Opposite (Color);
-      King_Sq : constant Square_Type :=
-        Lowest_Bit (B.Pieces (Make (Color, King)));
-      Occ     : constant Bitboard := B.All_Occ;
-      Own     : constant Bitboard := B.Color_Occ (Color);
-      Rook_Q  : constant Bitboard :=
-        B.Pieces (Make (Enemy, Rook)) or B.Pieces (Make (Enemy, Queen));
-      Bish_Q  : constant Bitboard :=
-        B.Pieces (Make (Enemy, Bishop)) or B.Pieces (Make (Enemy, Queen));
-      Pinners : Bitboard :=
-        (Rook_Ray (King_Sq) and Rook_Q) or (Bishop_Ray (King_Sq) and Bish_Q);
-      Result  : Bitboard := 0;
+      Enemy : constant Color_Type := Opposite (Color);
    begin
-      while Pinners /= 0 loop
-         declare
-            P        : constant Square_Type := Lowest_Bit (Pinners);
-            Blockers : Bitboard;
-         begin
-            Blockers := Between (King_Sq, P) and Occ;
-            if Blockers /= 0
-              and then (Blockers and (Blockers - 1)) = 0
-              and then (Blockers and Own) /= 0
-            then
-               Result := Result or Blockers;
-            end if;
-         end;
-         Pinners := Pinners and (Pinners - 1);
-      end loop;
-      return Result;
+      return Pinned
+        (Occ                => B.All_Occ,
+         King_Sq            => Lowest_Bit (B.Pieces (Make (Color, King))),
+         Own                => B.Color_Occ (Color),
+         Enemy_Rook_Queen   =>
+           B.Pieces (Make (Enemy, Rook)) or B.Pieces (Make (Enemy, Queen)),
+         Enemy_Bishop_Queen =>
+           B.Pieces (Make (Enemy, Bishop)) or B.Pieces (Make (Enemy, Queen)));
    end Pin_Mask_See;
 
    -------------
@@ -174,39 +144,70 @@ package body BBChess.See is
    -- Best outcome (>= 0, a side may always decline) for Side of the capture
    -- sequence on To, knowing On_Piece (a piece of the opponent) currently
    -- stands there. B is consumed along the way: every capture removes a piece.
+   --
+   -- The recursive minimax is unrolled into two passes whose result is
+   -- identical:
+   --   * forward, the capture sequence is generated exactly as before, each
+   --     side answering with Weakest (which recomputes the pin mask on the
+   --     mutated board, so pinned pieces still cannot recapture);
+   --   * backward, the "a side may decline" rule is applied with the same
+   --     max (0, value - reply) as the recursion, the king capture remaining
+   --     terminal.
+   -- This removes the per-ply call frames without changing any value.
    function Exchange (B        : in out See_Board;
                       To       : in Square_Type;
                       Side     : in Color_Type;
                       On_Piece : in Piece_Type) return Score_Type
    is
-      Found  : Boolean;
-      From   : Square_Type;
-      Att    : Piece_Type;
-      Value  : Score_Type;
+      Found     : Boolean;
+      From      : Square_Type;
+      Att       : Piece_Type;
+      On_Now    : Piece_Type := On_Piece;
+      Side_Now  : Color_Type := Side;
+      King_Last : Boolean := False;
+      Count     : Natural := 0;
+      --  Value of the piece captured at each ply (ply 1 first). Only the
+      --  1 .. Count prefix is read, so the array is left uninitialized.
+      Gain      : array (1 .. 33) of Score_Type;
+      Value     : Score_Type := 0;
    begin
-      Weakest (B, To, Side, Found, From, Att);
-      if not Found then
-         -- No attacker available: the opponent simply stands pat.
-         return 0;
-      end if;
+      --  Forward pass: generate the sequence, mutating the working board.
+      loop
+         Weakest (B, To, Side_Now, Found, From, Att);
+         exit when not Found;
 
-      -- Make the recapture.
-      See_Remove (B, Att, From);
-      See_Remove (B, On_Piece, To);
-      See_Put (B, Att, To);
+         Count := Count + 1;
+         Gain (Count) := SEE_Value (Kind (On_Now));
 
-      if Kind (Att) = King then
-         -- A king capture ends the sequence: the king itself cannot be
-         -- taken back in a legal exchange.
-         return Kind_Value (Kind (On_Piece));
-      end if;
+         --  Make the recapture.
+         See_Remove (B, Att, From);
+         See_Remove (B, On_Now, To);
+         See_Put (B, Att, To);
 
-      Value := Kind_Value (Kind (On_Piece))
-                 - Exchange (B, To, Opposite (Side), Att);
-      if Value < 0 then
-         -- Recapturing here would lose material: decline instead.
-         return 0;
-      end if;
+         if Kind (Att) = King then
+            --  A king capture ends the sequence: the king itself cannot be
+            --  taken back in a legal exchange.
+            King_Last := True;
+            exit;
+         end if;
+
+         On_Now   := Att;
+         Side_Now := Opposite (Side_Now);
+      end loop;
+
+      --  Backward pass: the recursive "max (0, value - reply)" unwind.
+      for P in reverse 1 .. Count loop
+         if P = Count and then King_Last then
+            Value := Gain (P);
+         else
+            Value := Gain (P) - Value;
+            if Value < 0 then
+               --  Recapturing here would lose material: decline instead.
+               Value := 0;
+            end if;
+         end if;
+      end loop;
+
       return Value;
    end Exchange;
 
@@ -229,7 +230,7 @@ package body BBChess.See is
       -- the promoted piece is what decides the outcome, and they are ordered
       -- ahead of captures anyway.
       if Move.Flag = Promotion then
-         return Kind_Value (Kind (Move.Promotion)) + 100;
+         return SEE_Value (Kind (Move.Promotion)) + 100;
       end if;
 
       -- Quiet (non-tactical) moves have no exchange to evaluate.
@@ -238,9 +239,9 @@ package body BBChess.See is
          if not Present then
             return 0;
          end if;
-         Victim := Kind_Value (Kind (Captured));
+         Victim := SEE_Value (Kind (Captured));
       else
-         Victim := Kind_Value (Pawn);
+         Victim := SEE_Value (Pawn);
          -- The captured pawn stands just behind the (empty) target square.
          if Side = White then
             Victim_Square := Move.To - 8;

@@ -18,7 +18,6 @@ with Ada.Real_Time;
 use Ada.Real_Time;
 
 with Ada.Text_IO;
-with Ada.IO_Exceptions;
 with Ada.Characters.Handling;
 
 with Ada.Numerics.Elementary_Functions;
@@ -48,6 +47,8 @@ with BBChess.Syzygy;
 
 with BBChess.Notation;
 use BBChess.Notation;
+
+with BBChess.Tunable;
 
 package body BBChess.Search is
 
@@ -1714,74 +1715,23 @@ package body BBChess.Search is
       end loop;
    end Set_Search_Real_Param;
 
+   procedure Load_Search_Params_File is new BBChess.Tunable.Load_File
+     (Set_Integer => Set_Search_Param,
+      Set_Real    => Set_Search_Real_Param);
+
    procedure Load_Search_Params (File_Name : in String) is
-      F    : Ada.Text_IO.File_Type;
-      Line : String (1 .. 256);
-      Last : Natural;
    begin
-      Ada.Text_IO.Open (F, Ada.Text_IO.In_File, File_Name);
-      while not Ada.Text_IO.End_Of_File (F) loop
-         Ada.Text_IO.Get_Line (F, Line, Last);
-         declare
-            S        : constant String := Line (1 .. Last);
-            I        : Natural := S'First;
-            Name_End : Natural;
-         begin
-            while I <= S'Last and then S (I) = ' ' loop
-               I := I + 1;
-            end loop;
-            Name_End := I;
-            while Name_End <= S'Last and then S (Name_End) /= ' ' loop
-               Name_End := Name_End + 1;
-            end loop;
-            if Name_End > I then
-               declare
-                  Name   : constant String := S (I .. Name_End - 1);
-                  VStart : Natural := Name_End;
-               begin
-                  while VStart <= S'Last and then S (VStart) = ' ' loop
-                     VStart := VStart + 1;
-                  end loop;
-                  if VStart <= S'Last then
-                     declare
-                        V : constant String := S (VStart .. S'Last);
-                     begin
-                        -- Integer parameters are the common case; a real
-                        -- parameter (fractional value) fails Integer'Value
-                        -- and is applied by the real setter.
-                        begin
-                           Set_Search_Param (Name, Integer'Value (V));
-                        exception
-                           when Constraint_Error =>
-                              begin
-                                 Set_Search_Real_Param (Name, Float'Value (V));
-                              exception
-                                 when Constraint_Error => null;
-                              end;
-                        end;
-                     end;
-                  end if;
-               end;
-            end if;
-         end;
-      end loop;
-      Ada.Text_IO.Close (F);
-   exception
-      when Ada.IO_Exceptions.Name_Error =>
-         Ada.Text_IO.Put_Line
-           ("warning: cannot open params file " & File_Name);
+      Load_Search_Params_File (File_Name);
    end Load_Search_Params;
 
    procedure Dump_Search_Params is
    begin
       for Id in Search_Param_Id loop
-         Ada.Text_IO.Put_Line
-           (Search_Param_Id'Image (Id) & " " & Integer'Image (Search_Params (Id)));
+         BBChess.Tunable.Put (Search_Param_Id'Image (Id), Search_Params (Id));
       end loop;
       for Id in Search_Real_Param_Id loop
-         Ada.Text_IO.Put_Line
-           (Search_Real_Param_Id'Image (Id) & " "
-            & Float'Image (Search_Real_Params (Id)));
+         BBChess.Tunable.Put
+           (Search_Real_Param_Id'Image (Id), Search_Real_Params (Id));
       end loop;
    end Dump_Search_Params;
 
