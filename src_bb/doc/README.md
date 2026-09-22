@@ -191,6 +191,9 @@ binaire `release` sans `rm -rf obj_bb`.
 - [build-and-cpu.md](build-and-cpu.md) : modes de construction (`release`,
   `portable`, `debug`), commutateurs GNAT/C exacts, alias `-T#`/`--thread=#` et
   historique des optimisations CPU.
+- `CHANGELOG_TECHNIQUE.md` (racine) : chantier solidité / propreté / performance
+  (P0-P7) — nettoyage C, invariant `Squares`, avertissements, `Piece_Values`,
+  SEE itérative, factorisation, `Cont_History` 16 bits.
 
 ## Références
 

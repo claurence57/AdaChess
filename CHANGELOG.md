@@ -2,6 +2,26 @@
 
 ## Non publié (développement post bb-1.0)
 
+### Solidité / propreté / performance (chantier P0-P7)
+
+- **P0** `bbchess-bits.c` **conservé** (le `bb_pext` sert au build *portable*) : seules
+  les fonctions mortes `bb_popcountll`/`bb_ctzll` retirées.
+- **P1** invariant `Position.Squares` **documenté + `pragma Assert`** (pas d'écriture
+  d'une valeur « vide », qui aurait été incohérente avec `Remove_Piece`).
+- **P2** `-gnatwa`/`-gnatVa` en build *debug* : **38 avertissements → 0**.
+- **P3** `BBChess.Piece_Values` : `Ordering_Value` (Roi=0) vs `SEE_Value`
+  (Roi=10 000) — fin du doublon `Kind_Value`.
+- **P4** SEE réécrite en **itérative** (0 divergence sur 592 M d'évaluations,
+  +0,22 % NPS).
+- **P5** `BBChess.Pin_Mask` partagé movegen/SEE et `BBChess.Tunable` factorisant la
+  sérialisation des paramètres (`--dump-params` byte-identique).
+- **P6** `Cont_History` en **16 bits** (−1,1 Mo, arbre bit-identique ; pas de gain de
+  vitesse — table non goulot).
+- Gates identiques à chaque étape : perft 1→5 exact, `--bench 9/11` =
+  **496 570 / 1 434 292**, `--selftest` vert (release/portable/debug). Détail :
+  `CHANGELOG_TECHNIQUE.md` et `DEVELOPMENT.md` §48.
+
+
 > **Développement assisté par IA.** Toutes les entrées ci-dessous (postérieures
 > au fork initial) ont été développées **avec l'aide d'agents IA** ; **aucun
 > développement n'a été fait manuellement**. Modèle principal : **DeepSeek V4.1

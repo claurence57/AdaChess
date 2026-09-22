@@ -2020,3 +2020,49 @@ Les réserves restantes sont structurelles et risquées — **évaluation
 incrémentale** dans `Make_Move`/`Unmake_Move`, et **réorganisation profonde du
 TT** (qui changerait les entrées acceptées) — et exigent preuve d'identité +
 SPRT long avant adoption. Détail dans `build-and-cpu.md`.
+
+---
+
+## 48. Chantier solidité / propreté / performance (P0-P7)
+
+Chantier de **robustesse, propreté et performance** (aucun retuning, aucune
+heuristique modifiée). Base `d2c8b4e` (v2.0). Détail complet dans
+**`CHANGELOG_TECHNIQUE.md`**. Filet de sécurité à chaque étape : perft 1→5 = 20 /
+400 / 8902 / 197281 / 4 865 609 **exact**, `--bench 9/11` = **496 570 / 1 434 292**
+nœuds **exacts**, `--selftest` vert (release **et** portable **et** debug),
+`--dump-params` byte-identique.
+
+**Trois propositions de la spécification ont été corrigées après audit** :
+
+- **P0** : `bbchess-bits.c` **n'est pas mort** — `bb_pext` sert au build **portable**
+  (`bbchess-attacks.adb`, `#else` de `#if REL`). Le supprimer aurait cassé
+  `-XMode=portable`. Seules `bb_popcountll`/`bb_ctzll` sont réellement inutilisées
+  (Ada importe les `__builtin_*` directement) → retirées, fichier conservé.
+- **P1** : `Squares (From)` non effacé n'est **pas** un bug — `Remove_Piece` ne
+  l'efface pas non plus, `Squares` n'est lu qu'après test `All_Occ`, et `Piece_Type`
+  n'a pas de « vide » → écrire une valeur vide dans le seul `Move_Piece` aurait été
+  **incohérent**. Retenu : invariant **documenté** + `pragma Assert` (debug only).
+- **P6** : l'index proposé (`6×64×64`) **change l'heuristique** (perd la case
+  d'arrivée du coup précédent) → non livré. Seule la **largeur** est réduite à
+  16 bits, **mêmes indices** : identité bit-à-bit, table 2,25 → 1,13 Mo.
+
+**Faits par chantier** : **P0** deux fonctions C mortes retirées ; **P1** invariant
++ asserts ; **P2** `-gnatwa`/`-gnatVa` en debug, **38 avertissements → 0** (tous
+corrigés, aucun masqué) ; **P3** `BBChess.Piece_Values` (`Ordering_Value` Roi=0 /
+`SEE_Value` Roi=10 000) met fin au doublon `Kind_Value` ; **P4** SEE réécrite en
+itérative (**592 068 345 évaluations, 0 divergence**, +0,22 % NPS, −0,65 %
+instructions — conservée) ; **P5** `BBChess.Pin_Mask` partagé movegen/SEE (`Pinned`,
+0 divergence vs marche de bloqueurs) et `BBChess.Tunable` factorisant la
+sérialisation `P_*`/`S_*` (`--dump-params` byte-identique) ; **P6** `Cont_History`
+16 bits (−1,1 Mo, arbre bit-identique, **pas** de gain de vitesse : table non
+goulot, LLC-miss −10,7 % mais cycles dans le bruit).
+
+**P7 — validation** : perft + Kiwipete exacts ; SMP (profondeur 14, 1 vs 4 threads,
+5 positions) sans crash et **scores plausibles** (2 bestmoves divergent mono/multi —
+attendu en Lazy SMP, l'identité mono-thread étant garantie par `--bench`) ; SPRT
+100 part. 10+0.1 vs `d2c8b4e` (résultat au §48/`CHANGELOG_TECHNIQUE.md`).
+
+**NPS global** : `--bench 11` min de 7 runs entrelacés — **avant 0,5045 s** vs
+**après 0,5065 s (−0,4 %, bruit)**. Aucune régression ; chantier de solidité et de
+propreté, plus un gain SEE marginal. **5 commits** P0→P6 (P3, P4 et P5 partagent un
+commit : hunks entrelacés dans les mêmes fichiers).

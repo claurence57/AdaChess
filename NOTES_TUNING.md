@@ -87,3 +87,12 @@ de recherche ci‑dessus sont modestes mais réels et validés par SPRT.
   (les deux couleurs).
 - Binaires hors dépôt : `/tmp/opencode/adachess_bb_nmp_r`,
   `/tmp/opencode/adachess_bb_qbound` ; patches `nmp_r.patch`, `qbound.patch`.
+
+## Chantier solidité / propreté / performance (P0-P7)
+
+Réalisé en **2026-09-22** sur la base `d2c8b4e` (v2.0) : nettoyage C, invariant
+`Squares`, avertissements (`-gnatwa` en debug), `BBChess.Piece_Values`,
+SEE itérative, factorisation (`Pin_Mask`, `Tunable`) et `Cont_History` 16 bits.
+Protocole, résultats et écarts assumés dans **`CHANGELOG_TECHNIQUE.md`** ;
+résumé dans `DEVELOPMENT.md` §48. Aucun paramètre d'éval ou de recherche n'a été
+retuné : gates identiques (perft, `--bench` 496 570 / 1 434 292, `--selftest`).
