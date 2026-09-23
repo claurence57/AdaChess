@@ -26,8 +26,8 @@
 > au fork initial) ont été développées **avec l'aide d'agents IA** ; **aucun
 > développement n'a été fait manuellement**. Modèle principal : **DeepSeek V4.1
 > Flash** ; corrections et compléments apportés par des **prompts générés avec
-> Claude** et **Kimi K3**. Outils de travail de base : **opencode** (agent
-> *Sisyphus* / OhMyOpenCode) et des **interfaces web**. Voir `DEVELOPMENT.md`
+> Claude** et **Kimi K3**. Outils de travail de base : **opencode** (plugin
+> **oh-my-openagent**) et des **interfaces web**. Voir `DEVELOPMENT.md`
 > (note en tête et §11).
 
 ### Recherche — Lazy SMP : interblocage, fuite mémoire, sélection du coup (D6)

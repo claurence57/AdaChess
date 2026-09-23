@@ -10,7 +10,7 @@ dit **BB**), les différences entre les deux, et l'état des améliorations jusq
 > d'agents IA** ; **aucun développement n'a été fait manuellement**. Modèle
 > principal : **DeepSeek V4.1 Flash** ; des corrections et compléments ont été
 > apportés par des **prompts générés avec Claude** et **Kimi K3**. Outils de
-> travail de base : **opencode** (agent *Sisyphus* / OhMyOpenCode) et des
+> travail de base : **opencode** (plugin **oh-my-openagent**) et des
 > **interfaces web**.
 
 ---
@@ -656,7 +656,7 @@ Les évolutions décrites aux **sections 9 et 10** (Phase 0/1 de la recherche,
 terme d'évaluation `threats`, et livre d'ouvertures Polyglot) ont été développées
 avec l'assistance d'un agent IA :
 
-- **Agent** : *Sisyphus* — projet **OhMyOpenCode** ;
+- **Plugin** : **oh-my-openagent** ;
 - **Modèle** : `deepseek/deepseek-v4-flash` ;
 - **Environnement** : **OpenCode**.
 

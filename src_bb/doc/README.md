@@ -13,8 +13,8 @@ en français) ; `CHANGELOG.md` couvre les versions de BB.
 > incluse) ont été réalisées **avec l'aide d'agents IA** ; **aucun développement
 > n'a été fait manuellement**. Modèle principal : **DeepSeek V4.1 Flash** ;
 > corrections et compléments apportés par des **prompts générés avec Claude** et
-> **Kimi K3**. Outils de travail de base : **opencode** (agent *Sisyphus* /
-> OhMyOpenCode) et des **interfaces web**.
+> **Kimi K3**. Outils de travail de base : **opencode** (plugin
+> **oh-my-openagent**) et des **interfaces web**.
 
 BB parle **XBoard/Winboard et UCI** (le protocole est choisi par la commande
 `uci`). Il gère une horloge `level`/`time`/`otim`, un livre d'ouvertures
